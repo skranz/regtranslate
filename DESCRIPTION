@@ -1,0 +1,11 @@
+Package: regtranslate
+Type: Package
+Title: Translate regression commands using information from regdb 
+Version: 0.1
+Author: Sebastian Kranz (Ulm University)
+Maintainer: Sebastian Kranz <sebastian.kranz@uni-ulm.de>
+Description: Currently only contains Stata to R translation
+License: Not yet licensed. Not yet in public domain
+Depends: dplyr, restorepoint, stringtools, fixest, broom, stringi
+Encoding: UTF-8
+LazyData: true

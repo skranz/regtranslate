@@ -1,0 +1,212 @@
+stata_to_r_code_fixest = function(reg, regvar, cmdpart, opts=code_options(), parts = list()) {
+  restore.point("stata_to_r_code_fixest")
+
+  # Ignore dropped regvars (at least if they are nor part of an interaction)
+  # These are explanatory variables that were given in the Stata formula
+  # but automatically dropped in the regression i.e. the coef is NA
+  # fixest will not automatically drop the same variables in a dummy set
+  # But then coefficients and se will vary in a way we cannot detect.
+  # So we enforce that the same variables will be dropped
+  regvar = filter(regvar, !is_dropped | ia_cterm != cterm)
+
+
+  formula = regvar_to_formula_fixest(regvar, cmdpart)
+
+  vcov_type =fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+
+  use_ssc = vcov_type %in% c("cluster","twoway","DK","NW")
+
+  use_sandwich = (vcov_type == "sandwich") | opts$prefer_sandwich
+  use_summary = use_sandwich | opts$prefer_summary
+
+  if (use_sandwich) {
+    reg_vcov = "iid"
+    vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args)
+  } else {
+    reg_vcov = fixest_vcov_code_from_regdb(reg$se_type, reg$se_args, vcov_type, quote=FALSE)
+    if (use_summary) {
+      vccov = reg_vcov
+    }
+  }
+
+  command = "feols"
+  arg_str = NULL
+  if (reg$cmd == "ppmlhdfe") {
+    command = "fepos"
+  } else if (reg$cmd %in% c("logit","xtlogit")) {
+    command = "feglm"
+    arg_str = "family=binomial()"
+  } else if (reg$cmd %in% c("probit","xtprobit","dprobit")) {
+    command = "feglm"
+    arg_str = 'family=binomial(link = "probit")'
+  } else {
+
+  }
+  arg_str = c(
+    paste0("fml = formula"),
+    paste0('data = dat'),
+    paste0('vcov = reg_vcov'),
+    arg_str
+  )
+
+  weight_var = regvar$cterm[regvar$role == "weight"]
+  if (length(weight_var)>0) {
+    arg_str = c(arg_str, paste0("weights = ~", paste0(weight_var, collapse="+")))
+  }
+
+
+  library_code = "library(fixest)"
+  rcmd_code = paste0('rcmd = "',command,'"')
+  # We use the default ssc arguments since they are closest to the
+  # Stata defaults
+  ssc_code = paste0('ssc=fixest::ssc()')
+  formula_code = paste0('formula = ', formula)
+  reg_vcov_code = paste0('reg_vcov = ', quote_arg(reg_vcov))
+  reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
+
+  code_df = tibble(part = c("library", "rcmd","formula", if (use_ssc) "ssc", "reg_vcov","reg"), code = c(library_code, rcmd_code,formula_code,if (use_ssc) ssc_code, reg_vcov_code, reg_code))
+
+  if (use_summary) {
+    sum_vcov_code = paste0('sum_vcov = ', quote_arg(vcov))
+    sum_code = 'sum = summary(reg, vcov = sum_vcov)'
+    code_df = bind_rows(code_df,
+      tibble(part = c("sum_vcov","sum"), code = c(sum_vcov_code, sum_code))
+    )
+  }
+  if (opts$add_broom) {
+    code_df = add_reg_broom_code(code_df, use_summary=use_summary, use_conf_int=TRUE)
+  }
+  if (opts$add_function) {
+    code_df = add_reg_function_code(code_df)
+  }
+  code_df
+}
+
+fixest_vcov_type_from_regdb = function(se_type, se_args) {
+  restore.point("se_type_to_fixest_vcov")
+  if (se_type == "hc1") return("hetero")
+  if (se_type %in%  c("cluster")) return(se_type)
+  if (se_type %in%  c("iid","cluster","twoway", "conley")) return(se_type)
+  if (se_type %in% c("nw", "dk")) return(toupper(se_type))
+  return("sandwich")
+}
+
+
+
+fixest_vcov_code_from_regdb = function(se_type, se_args,vcov_type=se_type_to_fixest_vcov_type(se_type,se_args), quote=TRUE) {
+  restore.point("fixest_vcov_code_from_regdb")
+  if (vcov_type %in% c("cluster","twoway")) {
+    clustervar = regdb_parse_se_args(se_args)
+    clustervar = clustervar[startsWith(names(clustervar),"cluster")]
+    clustervar_def = paste0('c(',paste0('"', clustervar,'"', collapse=", "),")")
+    code = paste0("vcov_cluster(",clustervar_def, ",ssc)")
+    return(code)
+  }
+  if (vcov_type %in% c("DK","NW")) {
+    stop("fixest_vcov_code_from_regdb not yet implemented for", vcov_type)
+  }
+  if (quote) return(paste0('"',vcov_type,'"'))
+  return(vcov_type)
+}
+
+# Ideally this is independent of the original language from
+# which regvar was generated. E.g. it would be create
+# if we could translate both a stata command and an R command to
+# fixest
+regvar_to_formula_fixest = function(regvar, cmdpart) {
+  restore.point("regvar_to_formula_fixest")
+
+  add_main_effects = TRUE
+
+  rv = regvar
+  rv = rv %>% mutate(
+    prefix = str.left.of(cterm,"@", not.found=rep("", length(cterm))) %>% tolower(),
+    is_ia = ia_num > 1
+  )
+
+  # We replace prefix @ with .
+  rv = replace_regvar_prefix_sep(rv, "@",".")
+
+
+  depvars = rv$cterm[rv$role=="dep"]
+  form = paste0(paste0(depvars, collapse=" + "), " ~ ")
+
+
+  omit_constant = any(cmdpart$part=="opt" & cmdpart$content=="nocons")
+  if (omit_constant) {
+    form = paste0(form, "0 + ")
+  }
+
+
+  # In stata x variables starting with o. like o.var will be omitted
+  rv = rv %>% filter(prefix!="o")
+
+
+  # TO DO: Specify whether in interaction A*B also A and B
+  #        should be included or not.
+  if (sum(rv$is_ia) >0 ) {
+    ia = rv %>%
+      filter(is_ia) %>%
+      group_by(is_ia, ia_cterm, role, ia_num, main_pos) %>%
+      arrange(desc(var_reg_type=="factor"), desc(var_reg_type=="dummy"), ia_pos) %>%
+      summarize(
+        absorbed_fe = first(absorbed_fe),
+        ia_type = case_when(
+          all(var_reg_type=="dummy") ~ "dummies",
+          all(var_reg_type=="numeric") ~ "numeric",
+          all(var_reg_type %in% c("dummy","factor")) ~ "factor",
+          ia_num == 2 & var_reg_type[1] == "dummy" & (var_reg_type[2]=="numeric") ~ "dummy_numeric",
+          ia_num == 2 & var_reg_type[1] == "factor" & var_reg_type[1] == "numeric" ~ "factor_numeric",
+          TRUE ~ "unknown"
+        )[1],
+        fe_expr = case_when(
+          ia_type == "factor_numeric" ~ paste0(cterm[1],"[",cterm[2],"]"),
+          TRUE ~ paste0(cterm, collapse="^")
+        )[1],
+        x_expr = paste0(
+          ifelse(!var_reg_type=="factor", cterm, paste0("factor(",cterm,")")),
+          collapse= if (isTRUE(first(add_main_effects))) "*" else ":"
+        )[1]
+      ) %>%
+      ungroup()
+  } else {
+    ia = NULL
+  }
+
+
+  no_ia = rv %>%
+    filter(!is_ia) %>%
+    mutate(
+      fe_expr = cterm,
+      x_expr = case_when(
+        var_reg_type == "factor" ~ paste0("factor(", cterm,")"),
+        TRUE ~ cterm
+      )
+    )
+
+  terms = bind_rows(ia, no_ia) %>%
+    arrange(main_pos)
+
+  # Exogeneous x that are no FE
+  rows = which(terms$role == "exo" & !terms$absorbed_fe)
+  if (sum(rows)>0) {
+    form = paste0(form, paste0(terms$x_expr[rows], collapse= " + "))
+  }
+
+  # Exogeneous x as FE
+  rows = which(terms$role == "exo" & terms$absorbed_fe)
+  if (sum(rows)>0) {
+    form = paste0(form, " | ",paste0(terms$fe_expr[rows], collapse= " + "))
+  }
+
+  # Endogeneous x and instruments (never FE)
+  rows = which(terms$role == "endo")
+  if (sum(rows)>0) {
+    form = paste0(form, " | ",paste0(terms$x_expr[rows], collapse= " + "))
+  }
+  rows = which(terms$role == "instr")
+  if (sum(rows)>0) {
+    form = paste0(form, " ~ ",paste0(terms$x_expr[rows], collapse= " + "))
+  }
+  form
+}
