@@ -1,6 +1,6 @@
 Package: regtranslate
 Type: Package
-Title: Translate regression commands using information from regdb 
+Title: Translate regression commands using information from repdb 
 Version: 0.1
 Author: Sebastian Kranz (Ulm University)
 Maintainer: Sebastian Kranz <sebastian.kranz@uni-ulm.de>

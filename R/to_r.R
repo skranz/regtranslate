@@ -14,6 +14,7 @@ example = function() {
   code_df = reg_stata_to_r_code(reg, regvar, opts = code_options(add_function=TRUE, add_restorepoint = TRUE))
 }
 
+
 code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE) {
   list(prefer_sandwich=prefer_sandwich, prefer_summary=prefer_summary, add_broom=add_broom, add_function=add_function, add_restorepoint=add_restorepoint)
 }
@@ -34,6 +35,22 @@ reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", o
   res
 }
 
+reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
+  restore.point("reg_stata_to_r_formula")
+
+  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer)
+  if (isTRUE(r_cmd == "no_trans")) {
+    return(NULL)
+  } else if (is.na(r_cmd)) {
+    stop(paste0("The Stata command ", reg$cmd, " is neither implemented for translation nor specified in stata_cmds_without_r_translation()"))
+  }
+
+  args = list(regvar=regvar,regxvar, cmdpart=cmdpart)
+  fun = paste0("regvar_to_formula_",r_cmd)
+  res = do.call(fun, args)
+  as.formula(res)
+}
+
 get_stata_to_r_cmd = function(cmd, prefer = NULL) {
   df = stata_to_r_cmds_df()
   rows = df$stata_cmd == cmd
@@ -50,8 +67,8 @@ get_stata_to_r_cmd = function(cmd, prefer = NULL) {
 stata_to_r_cmds_df = function(cmd) {
   li = list(
     # If you add commands here make to sure that you update the to_r_fixest.R code
-    fixest.. = c("regress","ivregress","ivreg","ivreg2","reghdfe","xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit"),
-    lm.. = c("regress"),
+    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","reghdfe","xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit"),
+    lm.. = c("regress","reg"),
     ivreg.. = c("ivregress","ivreg","ivreg2"),
     quantreg.. = c("qreg"),
     # Note that parmest does return coefficients not marginal
