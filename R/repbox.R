@@ -16,6 +16,7 @@ mr_reg_stata_to_r_code = function(mr, step, prefer="fixest", opts=code_options()
 }
 
 repbox_reg_stata_to_r_code = function(project_dir, steps=NULL, parcels, prefer="fixest", opts=code_options(), just_formula=FALSE) {
+  restore.point("repbox_reg_stata_to_r_code")
   reg = parcels$base_core$reg
   regvar = parcels$base_regvar$regvar
   regxvar = parcels$base_regxvar$regxvar
@@ -27,7 +28,7 @@ repbox_reg_stata_to_r_code = function(project_dir, steps=NULL, parcels, prefer="
   reg = reg %>% filter(step %in% steps)
   regvar = regvar %>% filter(step %in% steps)
   regxvar = regxvar %>% filter(step %in% steps)
-  cmdpart = regxvar %>% filter(step %in% steps)
+  cmdpart = cmdpart %>% filter(step %in% steps)
 
   if (just_formula) {
     return(reg_stata_to_r_formula(reg, regvar, regxvar, cmdpart, prefer=prefer, opts=opts))
