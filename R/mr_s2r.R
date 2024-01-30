@@ -34,7 +34,7 @@ mr_s2r_study = function(project.dir, variant = "s2r") {
   }
 
   # Load tables from regdb beyond "reg" that will be used
-  mr = mr_load_parcels(mr, c("base_core", "base_cmdpart","base_regcoef","base_regvar","base_regxvar"))
+  mr = mr_load_parcels(mr, c("reg_core", "cmdpart","regcoef","regvar","regxvar"))
 
   # Run the study
   mr = mr_run(mr)

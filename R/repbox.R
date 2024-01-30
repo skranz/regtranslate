@@ -3,7 +3,7 @@
 
 repbox_load_regtranslate_parcels = function(project_dir, parcels = list()) {
   library(repboxDB)
-  parcels = repdb_load_parcels(project_dir,c("base_core","base_regvar","base_regxvar","base_cmdpart"), parcels=parcels)
+  parcels = repdb_load_parcels(project_dir,c("reg_core","regvar","regxvar","cmdpart"), parcels=parcels)
 
 }
 
@@ -17,10 +17,10 @@ mr_reg_stata_to_r_code = function(mr, step, prefer="fixest", opts=code_options()
 
 repbox_reg_stata_to_r_code = function(project_dir, steps=NULL, parcels, prefer="fixest", opts=code_options(), just_formula=FALSE) {
   restore.point("repbox_reg_stata_to_r_code")
-  reg = parcels$base_core$reg
-  regvar = parcels$base_regvar$regvar
-  regxvar = parcels$base_regxvar$regxvar
-  cmdpart = parcels$base_cmdpart$cmdpart
+  reg = parcels$reg_core$reg
+  regvar = parcels$regvar$regvar
+  regxvar = parcels$regxvar$regxvar
+  cmdpart = parcels$cmdpart$cmdpart
 
   if (is.null(steps)) steps = reg$step
 

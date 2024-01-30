@@ -11,8 +11,8 @@ example = function() {
   org_dat = dat
   dat = mr_adapt_data_for_reg(project.dir, step, internal_reg, dat)
 
-  regvar = load_parcel(project.dir, "base","base_regvar")$regvar %>% filter(step==5)
-  regcoef = load_parcel(project.dir, "base","base_regcoef")$regcoef %>% filter(step==5)
+  regvar = load_parcel(project.dir, "base","regvar")$regvar %>% filter(step==5)
+  regcoef = load_parcel(project.dir, "base","regcoef")$regcoef %>% filter(step==5)
 
   res = expand_reg_dat_cols(regvar, dat)
   erv = specify_used_reg_vars(res$eregvar, regcoef)

@@ -2,7 +2,7 @@
 example = function() {
   project.dir = "C:/libraries/repbox/projects_reg/testsupp"
 
-  core = readRDS(file.path(project.dir, "regdb","base_core.Rds"))
+  core = readRDS(file.path(project.dir, "regdb","reg_core.Rds"))
   regs = core$reg
   varinfo = readRDS(file.path(project.dir, "regdb","base_varinfo.Rds"))
   regvars =  varinfo$regvar
