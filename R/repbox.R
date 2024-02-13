@@ -7,7 +7,13 @@ repbox_load_regtranslate_parcels = function(project_dir, parcels = list()) {
 
 }
 
+mr_load_regtranslate_parcels = function(mr) {
+  mr$parcels = repbox_load_regtranslate_parcels(mr$project_dir, mr$parcels)
+  mr
+}
+
 mr_reg_stata_to_r_formula = function(mr, step, prefer="fixest", opts=code_options()) {
+
   repbox_reg_stata_to_r_code(mr$project_dir, step, mr$parcels, prefer=prefer, opts=opts, just_formula = TRUE)
 }
 
