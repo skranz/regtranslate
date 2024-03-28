@@ -6,7 +6,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
 
-  vcov_type =fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
 
   use_ssc = vcov_type %in% c("cluster","twoway","DK","NW")
 
@@ -98,8 +98,9 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
 fixest_vcov_code_from_regdb = function(se_type, se_args,vcov_type=se_type_to_fixest_vcov_type(se_type,se_args), quote=TRUE) {
   restore.point("fixest_vcov_code_from_regdb")
   if (vcov_type %in% c("cluster","twoway")) {
-    clustervar = regdb_parse_se_args(se_args)
-    clustervar = clustervar[startsWith(names(clustervar),"cluster")]
+    clustervar = extract_clustervar_from_se_args(se_args)
+    #clustervar = regdb_parse_se_args(se_args)
+    #clustervar = clustervar[startsWith(names(clustervar),"cluster")]
     clustervar_def = paste0('c(',paste0('"', clustervar,'"', collapse=", "),")")
     code = paste0("vcov_cluster(",clustervar_def, ",ssc)")
     return(code)
