@@ -52,6 +52,7 @@ reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest"
 }
 
 get_stata_to_r_cmd = function(cmd, prefer = NULL) {
+  restore.point("get_stata_to_r_cmd")
   df = stata_to_r_cmds_df()
   rows = df$stata_cmd == cmd
   if (length(rows)==0) return(NA)
