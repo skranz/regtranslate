@@ -160,6 +160,9 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   rows = which(rxv$role == "exo")
   if (sum(rows)>0) {
     form = paste0(form, paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+  } else {
+    # add explicit constant if no x variables
+    form = paste0(form, "1")
   }
 
   # Exogeneous x as FE
