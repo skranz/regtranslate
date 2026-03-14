@@ -57,6 +57,8 @@ expand_reg_dat_cols = function(regvar, dat) {
       res = make_factor_level_vars(cterm,dat, level_li = factor_levels)
     } else if (length(rows)==2) {
       res = make_ia2_vars(regvar[rows,], dat,  level_li = factor_levels)
+    } else if (length(rows)==3) {
+      res = make_ia3_vars(regvar[rows,], dat,  level_li = factor_levels)
     } else {
       stop("Cannot yet deal with tripple interactions or more.")
     }
@@ -110,7 +112,7 @@ make_ia2_vars = function(rv, dat, level_li) {
   }
 
   grid = expand.grid(var1=vars1, var2=vars2,stringsAsFactors = FALSE) %>%
-    mutate(var12 = sapply(strsplit(paste0(var1,"#", var2), "#", fixed=TRUE), function(x) paste0(sort(x), collapse="#")))
+    mutate(var12 = sort2_chr(var1, var2, "#"))
 
   dat12_li = lapply(seq_rows(grid), function(i) {
     if (is_factor1) {
@@ -131,61 +133,45 @@ make_ia2_vars = function(rv, dat, level_li) {
   bind_cols(fdat, dat12)
 }
 
-# make_ia2_vars = function(rv, dat, level_li) {
-#   restore.point("make_ia2_vars")
-#
-#   # Create main effects (just for factors: numerical variables are already part of dat)
-#   factor_rows = which(rv$var_reg_type == "factor")
-#   if (length(factor_rows)>0) {
-#     fdat = lapply(rv$cterm[factor_rows],make_factor_level_vars, dat=dat, level_li=level_li) %>%
-#       bind_cols()
-#   } else {
-#     fdat = NULL
-#   }
-#
-#   #new_cols = setdiff(colnames(fdat), colnames(dat))
-#   #dat[new_cols] = fdat[new_cols]
-#
-#   cterm1 = rv$cterm[1]
-#   cterm2 = rv$cterm[2]
-#
-#   is_factor1 = rv$var_reg_type[1]=="factor"
-#   is_factor2 = rv$var_reg_type[2]=="factor"
-#
-#   if (is_factor1) {
-#     vars1 = paste0(cterm1,"=", level_li[[cterm1]])
-#   } else {
-#     vars1 = cterm1
-#   }
-#
-#   if (is_factor2) {
-#     vars2 = paste0(cterm2,"=", level_li[[cterm2]])
-#   } else {
-#     vars2 = cterm2
-#   }
-#
-#   grid = expand.grid(var1=vars1, var2=vars2,stringsAsFactors = FALSE) %>%
-#     mutate(var12 = paste0(var1,"#", var2))
-#
-#   dat12_li = lapply(seq_rows(grid), function(i) {
-#     if (is_factor1) {
-#       val1 = fdat[[grid$var1[i]]]
-#     } else {
-#       val1 = dat[[grid$var1[i]]]
-#     }
-#     if (is_factor2) {
-#       val2 = fdat[[grid$var2[i]]]
-#     } else {
-#       val2 = dat[[grid$var2[i]]]
-#     }
-#     val1*val2
-#   })
-#   names(dat12_li) = grid$var12
-#   dat12 = as_tibble(dat12_li)
-#
-#   bind_cols(fdat, dat12)
-# }
+# FILE: regtranslate/regvar_expand.R
+make_ia3_vars = function(rv, dat, level_li) {
+  restore.point("make_ia3_vars")
 
+  factor_rows = which(rv$var_reg_type == "factor")
+  if (length(factor_rows)>0) {
+    fdat = lapply(rv$cterm[factor_rows], make_factor_level_vars, dat=dat, level_li=level_li) %>%
+      bind_cols()
+  } else {
+    fdat = NULL
+  }
+
+  is_f1 = rv$var_reg_type[1]=="factor"
+  is_f2 = rv$var_reg_type[2]=="factor"
+  is_f3 = rv$var_reg_type[3]=="factor"
+
+  vars1 = if (is_f1) paste0(rv$cterm[1],"=", level_li[[rv$cterm[1]]]) else rv$cterm[1]
+  vars2 = if (is_f2) paste0(rv$cterm[2],"=", level_li[[rv$cterm[2]]]) else rv$cterm[2]
+  vars3 = if (is_f3) paste0(rv$cterm[3],"=", level_li[[rv$cterm[3]]]) else rv$cterm[3]
+
+  # 2-way grids
+  g12 = expand.grid(v1=vars1, v2=vars2, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
+  g13 = expand.grid(v1=vars1, v2=vars3, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
+  g23 = expand.grid(v1=vars2, v2=vars3, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
+
+  # 3-way grid
+  g123 = expand.grid(v1=vars1, v2=vars2, v3=vars3, stringsAsFactors=FALSE) %>%
+    mutate(var = split_and_sort(paste0(v1, "#", v2, "#", v3), split="#", k=3L))
+
+  # Compute values
+  get_val = function(is_f, grid_col, i) if (is_f) fdat[[grid_col[i]]] else dat[[grid_col[i]]]
+
+  dat12 = as_tibble(setNames(lapply(seq_rows(g12), function(i) get_val(is_f1, g12$v1, i) * get_val(is_f2, g12$v2, i)), g12$var))
+  dat13 = as_tibble(setNames(lapply(seq_rows(g13), function(i) get_val(is_f1, g13$v1, i) * get_val(is_f3, g13$v2, i)), g13$var))
+  dat23 = as_tibble(setNames(lapply(seq_rows(g23), function(i) get_val(is_f2, g23$v1, i) * get_val(is_f3, g23$v2, i)), g23$var))
+  dat123 = as_tibble(setNames(lapply(seq_rows(g123), function(i) get_val(is_f1, g123$v1, i) * get_val(is_f2, g123$v2, i) * get_val(is_f3, g123$v3, i)), g123$var))
+
+  bind_cols(fdat, dat12, dat13, dat23, dat123)
+}
 
 make_factor_level_vars = function(var,dat, levels = level_li[[var]],level_li) {
   restore.point("make_factor_level_vars")

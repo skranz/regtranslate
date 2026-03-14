@@ -48,8 +48,9 @@ cterm_of_r_coefs_fixest = function(terms, regvar, dot_to_at=FALSE) {
     terms[rows[change]] = terms.no.fit[change]
   }
 
-  if (any(has.substr(terms, "#"))) {
-    terms = sapply(strsplit(terms, "#", fixed=TRUE), function(x) paste0(sort(x), collapse="#"))
+  ia_rows = which(has.substr(terms, "#"))
+  if (length(ia_rows) > 0) {
+    terms[ia_rows] = split_and_sort(terms[ia_rows], split = "#")
   }
 
   terms
