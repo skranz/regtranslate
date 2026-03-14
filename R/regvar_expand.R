@@ -83,7 +83,6 @@ expand_reg_dat_cols = function(regvar, dat) {
 make_ia2_vars = function(rv, dat, level_li) {
   restore.point("make_ia2_vars")
 
-  # Create main effects (just for factors: numerical variables are already part of dat)
   factor_rows = which(rv$var_reg_type == "factor")
   if (length(factor_rows)>0) {
     fdat = lapply(rv$cterm[factor_rows],make_factor_level_vars, dat=dat, level_li=level_li) %>%
@@ -91,9 +90,6 @@ make_ia2_vars = function(rv, dat, level_li) {
   } else {
     fdat = NULL
   }
-
-  #new_cols = setdiff(colnames(fdat), colnames(dat))
-  #dat[new_cols] = fdat[new_cols]
 
   cterm1 = rv$cterm[1]
   cterm2 = rv$cterm[2]
@@ -114,7 +110,7 @@ make_ia2_vars = function(rv, dat, level_li) {
   }
 
   grid = expand.grid(var1=vars1, var2=vars2,stringsAsFactors = FALSE) %>%
-    mutate(var12 = paste0(var1,"#", var2))
+    mutate(var12 = sapply(strsplit(paste0(var1,"#", var2), "#", fixed=TRUE), function(x) paste0(sort(x), collapse="#")))
 
   dat12_li = lapply(seq_rows(grid), function(i) {
     if (is_factor1) {
@@ -134,6 +130,61 @@ make_ia2_vars = function(rv, dat, level_li) {
 
   bind_cols(fdat, dat12)
 }
+
+# make_ia2_vars = function(rv, dat, level_li) {
+#   restore.point("make_ia2_vars")
+#
+#   # Create main effects (just for factors: numerical variables are already part of dat)
+#   factor_rows = which(rv$var_reg_type == "factor")
+#   if (length(factor_rows)>0) {
+#     fdat = lapply(rv$cterm[factor_rows],make_factor_level_vars, dat=dat, level_li=level_li) %>%
+#       bind_cols()
+#   } else {
+#     fdat = NULL
+#   }
+#
+#   #new_cols = setdiff(colnames(fdat), colnames(dat))
+#   #dat[new_cols] = fdat[new_cols]
+#
+#   cterm1 = rv$cterm[1]
+#   cterm2 = rv$cterm[2]
+#
+#   is_factor1 = rv$var_reg_type[1]=="factor"
+#   is_factor2 = rv$var_reg_type[2]=="factor"
+#
+#   if (is_factor1) {
+#     vars1 = paste0(cterm1,"=", level_li[[cterm1]])
+#   } else {
+#     vars1 = cterm1
+#   }
+#
+#   if (is_factor2) {
+#     vars2 = paste0(cterm2,"=", level_li[[cterm2]])
+#   } else {
+#     vars2 = cterm2
+#   }
+#
+#   grid = expand.grid(var1=vars1, var2=vars2,stringsAsFactors = FALSE) %>%
+#     mutate(var12 = paste0(var1,"#", var2))
+#
+#   dat12_li = lapply(seq_rows(grid), function(i) {
+#     if (is_factor1) {
+#       val1 = fdat[[grid$var1[i]]]
+#     } else {
+#       val1 = dat[[grid$var1[i]]]
+#     }
+#     if (is_factor2) {
+#       val2 = fdat[[grid$var2[i]]]
+#     } else {
+#       val2 = dat[[grid$var2[i]]]
+#     }
+#     val1*val2
+#   })
+#   names(dat12_li) = grid$var12
+#   dat12 = as_tibble(dat12_li)
+#
+#   bind_cols(fdat, dat12)
+# }
 
 
 make_factor_level_vars = function(var,dat, levels = level_li[[var]],level_li) {
