@@ -137,11 +137,16 @@ add_reg_broom_code = function(code_df, use_summary=any(code_df$part=="sum"), use
   bind_rows(code_df, tidy_df)
 }
 
-
+# update: don't quote one-sided formulas
 quote_arg = function(arg) {
-  quote = suppressWarnings(!has.substr(arg,"(") & is.na(as.numeric(arg)) & is.na(as.logical(arg)))
+  quote = suppressWarnings(!has.substr(arg,"(") & !startsWith(trimws(arg), "~") & is.na(as.numeric(arg)) & is.na(as.logical(arg)))
   ifelse(quote, paste0('"', arg,'"'), arg)
 }
+
+# quote_arg = function(arg) {
+#   quote = suppressWarnings(!has.substr(arg,"(") & is.na(as.numeric(arg)) & is.na(as.logical(arg)))
+#   ifelse(quote, paste0('"', arg,'"'), arg)
+# }
 
 replace_regvar_prefix_sep = function(regvar, from="@", to=".") {
   regvar$cterm = gsub(from, to, regvar$cterm, fixed=TRUE)

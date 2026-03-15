@@ -1,3 +1,5 @@
+
+# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_fixest")
 
@@ -9,7 +11,6 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
 
   use_ssc = vcov_type %in% c("cluster","twoway","DK","NW")
-
   use_sandwich = (vcov_type == "sandwich") | opts$prefer_sandwich
   use_summary = use_sandwich | opts$prefer_summary
 
@@ -19,7 +20,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   } else {
     reg_vcov = fixest_vcov_code_from_regdb(reg$se_type, reg$se_args, vcov_type, quote=FALSE)
     if (use_summary) {
-      vccov = reg_vcov
+      vcov = reg_vcov
     }
   }
 
@@ -33,9 +34,8 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   } else if (reg$cmd %in% c("probit","xtprobit","dprobit")) {
     command = "feglm"
     arg_str = 'family=binomial(link = "probit")'
-  } else {
-
   }
+
   arg_str = c(
     paste0("fml = formula"),
     paste0('data = dat'),
@@ -43,16 +43,18 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
     arg_str
   )
 
+  # Pass ssc to feols natively
+  if (use_ssc) {
+    arg_str = c(arg_str, "ssc = ssc")
+  }
+
   weight_var = regvar$cterm[regvar$role == "weight"]
   if (length(weight_var)>0) {
     arg_str = c(arg_str, paste0("weights = ~", paste0(weight_var, collapse="+")))
   }
 
-
   library_code = "library(fixest)"
   rcmd_code = paste0('rcmd = "',command,'"')
-  # We use the default ssc arguments since they are closest to the
-  # Stata defaults
   if (all(org_depvars==mod_depvars)) {
     data_code = ""
   } else {
@@ -66,7 +68,8 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   reg_vcov_code = paste0('reg_vcov = ', quote_arg(reg_vcov))
   reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
 
-  code_df = tibble(part = c("library", "rcmd","data","formula", if (use_ssc) "ssc", "reg_vcov","reg"), code = c(library_code, rcmd_code,data_code, formula_code,if (use_ssc) ssc_code, reg_vcov_code, reg_code))
+  code_df = tibble(part = c("library", "rcmd","data","formula", if (use_ssc) "ssc", "reg_vcov","reg"),
+                   code = c(library_code, rcmd_code,data_code, formula_code,if (use_ssc) ssc_code, reg_vcov_code, reg_code))
 
   if (use_summary) {
     sum_vcov_code = paste0('sum_vcov = ', quote_arg(vcov))
@@ -84,6 +87,26 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   code_df
 }
 
+
+fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE) {
+  restore.point("fixest_vcov_code_from_regdb")
+
+  if (vcov_type %in% c("cluster","twoway")) {
+    clustervar = extract_clustervar_from_se_args(se_args)
+    # Return as a formula (~ var1 + var2) natively supported by fixest
+    code = paste0("~ ", paste0("`", clustervar, "`", collapse = " + "))
+    return(code)
+  }
+  if (vcov_type %in% c("DK","NW")) {
+    stop("fixest_vcov_code_from_regdb not yet implemented for ", vcov_type)
+  }
+  if (quote) return(paste0('"',vcov_type,'"'))
+  return(vcov_type)
+}
+
+
+
+
 fixest_vcov_type_from_regdb = function(se_type, se_args) {
   restore.point("se_type_to_fixest_vcov")
   if (se_type == "hc1") return("hetero")
@@ -93,24 +116,6 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
   return("sandwich")
 }
 
-
-
-fixest_vcov_code_from_regdb = function(se_type, se_args,vcov_type=se_type_to_fixest_vcov_type(se_type,se_args), quote=TRUE) {
-  restore.point("fixest_vcov_code_from_regdb")
-  if (vcov_type %in% c("cluster","twoway")) {
-    clustervar = extract_clustervar_from_se_args(se_args)
-    #clustervar = regdb_parse_se_args(se_args)
-    #clustervar = clustervar[startsWith(names(clustervar),"cluster")]
-    clustervar_def = paste0('c(',paste0('"', clustervar,'"', collapse=", "),")")
-    code = paste0("vcov_cluster(",clustervar_def, ",ssc)")
-    return(code)
-  }
-  if (vcov_type %in% c("DK","NW")) {
-    stop("fixest_vcov_code_from_regdb not yet implemented for", vcov_type)
-  }
-  if (quote) return(paste0('"',vcov_type,'"'))
-  return(vcov_type)
-}
 
 
 # Ideally this is independent of the original language from
