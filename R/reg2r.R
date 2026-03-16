@@ -122,9 +122,9 @@ vi_to_lm_iv_formula = function(vi, min_fe_level = Inf, as.character = FALSE) {
   terms = vi_to_lm_felm_terms(vi, min_fe_level = min_fe_level)
 
   # Exogeneous x that are no FE
-  rows = which(terms$role == "exo" & terms$as_fe == FALSE)
-  if (sum(rows)>0) {
-    form = paste0(form, paste0(terms$x_expr[rows], collapse= " + "))
+  exo.rows = which(terms$role == "exo" & terms$as_fe == FALSE)
+  if (sum(exo.rows)>0) {
+    form = paste0(form, paste0(terms$x_expr[exo.rows], collapse= " + "))
   } else {
     form = "0"
   }
@@ -134,6 +134,7 @@ vi_to_lm_iv_formula = function(vi, min_fe_level = Inf, as.character = FALSE) {
   if (sum(rows)>0) {
     form = paste0(form, " | ",paste0(terms$x_expr[c(rows, exo.rows)], collapse= " + "))
   }
+
 
   if (as.character) return(form)
   as.formula(form)
