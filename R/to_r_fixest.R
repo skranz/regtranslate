@@ -122,6 +122,10 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
 # which regvar was generated. E.g. it would be create
 # if we could translate both a stata command and an R command to
 # fixest
+# Ideally this is independent of the original language from
+# which regvar was generated. E.g. it would be create
+# if we could translate both a stata command and an R command to
+# fixest
 regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   restore.point("regvar_to_formula_fixest")
 
@@ -139,13 +143,10 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   rv = rv %>% mutate(
     prefix = str.left.of(cterm,"@", not.found=rep("", length(cterm))) %>% tolower()
   )
-  #rv = rv %>%  replace_regvar_prefix_sep("@",".")
 
   rxv = rxv %>% mutate(
     prefix = str.left.of(cterm,"@", not.found=rep("", length(cterm))) %>% tolower()
   )
-  #rvx = rvx%>% replace_regvar_prefix_sep("@",".")
-
 
   depvars = rv$cterm[rv$role=="dep"]
   depvars = replace_cterm_special_symbols(depvars)
@@ -171,10 +172,26 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   }
 
   # Exogeneous x as FE
-  # We assume here simple n-way fixed effects (no factor_numeric combis)
   rows = which(rv$role == "exo" & rv$absorbed_fe)
   if (sum(rows)>0) {
-    form = paste0(form, " | ",paste0("`",rv$cterm[rows],"`", collapse= " + "))
+    fe_terms = rv[rows, ] %>%
+      group_by(ia_cterm) %>%
+      arrange(ia_pos) %>%
+      summarize(
+        fe_expr = {
+          if (first(ia_reg_type) == "factor_numeric" && n() == 2) {
+            f_idx = which(var_reg_type %in% c("factor", "fe"))[1]
+            n_idx = which(!var_reg_type %in% c("factor", "fe"))[1]
+            if (is.na(f_idx)) f_idx = 1
+            if (is.na(n_idx)) n_idx = 2
+            paste0("`", cterm[f_idx], "`[`", cterm[n_idx], "`]")
+          } else {
+            paste0("`", cterm, "`", collapse = "^")
+          }
+        }
+      ) %>%
+      pull(fe_expr)
+    form = paste0(form, " | ", paste0(fe_terms, collapse = " + "))
   }
 
   # Endogeneous x and instruments (never FE)
@@ -188,6 +205,7 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   }
   form
 }
+
 
 
 # Ideally this is independent of the original language from
@@ -237,15 +255,21 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
           all(var_reg_type=="numeric") ~ "numeric",
           all(var_reg_type %in% c("dummy","factor")) ~ "factor",
           ia_num == 2 & var_reg_type[1] == "dummy" & (var_reg_type[2]=="numeric") ~ "dummy_numeric",
-          ia_num == 2 & var_reg_type[1] == "factor" & var_reg_type[1] == "numeric" ~ "factor_numeric",
+          ia_num == 2 & var_reg_type[1] %in% c("factor", "fe") & var_reg_type[2] == "numeric" ~ "factor_numeric",
           TRUE ~ "unknown"
         )[1],
         fe_expr = case_when(
-          ia_type == "factor_numeric" ~ paste0(cterm[1],"[",cterm[2],"]"),
-          TRUE ~ paste0(cterm, collapse="^")
+          ia_type == "factor_numeric" ~ {
+            f_idx = which(var_reg_type %in% c("factor", "fe"))[1]
+            n_idx = which(!var_reg_type %in% c("factor", "fe"))[1]
+            if (is.na(f_idx)) f_idx = 1
+            if (is.na(n_idx)) n_idx = 2
+            paste0("`", cterm[f_idx], "`[`", cterm[n_idx], "`]")
+          },
+          TRUE ~ paste0("`", cterm, "`", collapse="^")
         )[1],
         x_expr = paste0(
-          ifelse(!var_reg_type=="factor", cterm, paste0("factor(",cterm,")")),
+          ifelse(!var_reg_type %in% c("factor", "fe"), paste0("`", cterm, "`"), paste0("factor(`",cterm,"`)")),
           collapse= if (isTRUE(first(add_main_effects))) "*" else ":"
         )[1]
       ) %>%
@@ -258,10 +282,10 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
   no_ia = rv %>%
     filter(!is_ia) %>%
     mutate(
-      fe_expr = cterm,
+      fe_expr = paste0("`", cterm, "`"),
       x_expr = case_when(
-        var_reg_type == "factor" ~ paste0("factor(", cterm,")"),
-        TRUE ~ cterm
+        var_reg_type %in% c("factor", "fe") ~ paste0("factor(`", cterm,"`)"),
+        TRUE ~ paste0("`", cterm, "`")
       )
     )
 
