@@ -23,10 +23,9 @@ reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", o
   restore.point("reg_stata_to_r_code")
 
   r_cmd = get_stata_to_r_cmd(reg$cmd, prefer)
-  if (isTRUE(r_cmd == "no_trans")) {
+  if (isTRUE(r_cmd == "no_trans") | is.na(r_cmd)) {
+    cat(paste0("The Stata command ", reg$cmd, " is not yet implemented for translation in regtranslate."))
     return(NULL)
-  } else if (is.na(r_cmd)) {
-    stop(paste0("The Stata command ", reg$cmd, " is neither implemented for translation nor specified in stata_cmds_without_r_translation()"))
   }
 
   args = list(reg=reg, regvar=regvar,regxvar, cmdpart=cmdpart, opts=opts)

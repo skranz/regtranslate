@@ -1,0 +1,16 @@
+DESCRIPTION
+R/cterms_r.R
+R/investigate.R
+R/mr_s2r.R
+R/reg2r.R
+R/regvar_expand.R
+R/repbox.R
+R/s2r_repex.R
+R/se.R
+R/split_n_sort.R
+R/to_r_fixest.R
+R/to_r_lm.R
+R/to_r_mfx.R
+R/to_r_quantreg.R
+R/to_r.R
+R/to_r_tobit.R
