@@ -1,5 +1,6 @@
 
 # Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
+# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_fixest")
 
@@ -9,8 +10,9 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
 
   vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+  ssc_expr = fixest_ssc_code_from_reg(reg, vcov_type = vcov_type)
+  use_ssc = !is.null(ssc_expr)
 
-  use_ssc = vcov_type %in% c("cluster","twoway","DK","NW")
   use_sandwich = (vcov_type == "sandwich") | opts$prefer_sandwich
   use_summary = use_sandwich | opts$prefer_summary
 
@@ -38,12 +40,12 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   arg_str = c(
     paste0("fml = formula"),
-    paste0('data = dat'),
-    paste0('vcov = reg_vcov'),
+    paste0("data = dat"),
+    paste0("vcov = reg_vcov"),
     arg_str
   )
 
-  # Pass ssc to feols natively
+  # Pass ssc to fixest natively when relevant.
   if (use_ssc) {
     arg_str = c(arg_str, "ssc = ssc")
   }
@@ -63,18 +65,21 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
       collapse="\n"
     )
   }
-  ssc_code = paste0('ssc=fixest::ssc()')
-  formula_code = paste0('formula = ', formula)
-  reg_vcov_code = paste0('reg_vcov = ', quote_arg(reg_vcov))
-  reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
+  ssc_code = if (use_ssc) paste0("ssc = ", ssc_expr) else NULL
+  formula_code = paste0("formula = ", formula)
+  reg_vcov_code = paste0("reg_vcov = ", quote_arg(reg_vcov))
+  reg_code = paste0("reg = ", command, "(", paste0(arg_str, collapse=","), ")")
 
-  code_df = tibble(part = c("library", "rcmd","data","formula", if (use_ssc) "ssc", "reg_vcov","reg"),
-                   code = c(library_code, rcmd_code,data_code, formula_code,if (use_ssc) ssc_code, reg_vcov_code, reg_code))
+  code_df = tibble(
+    part = c("library", "rcmd", "data", "formula", if (use_ssc) "ssc", "reg_vcov", "reg"),
+    code = c(library_code, rcmd_code, data_code, formula_code, if (use_ssc) ssc_code, reg_vcov_code, reg_code)
+  )
 
   if (use_summary) {
-    sum_vcov_code = paste0('sum_vcov = ', quote_arg(vcov))
-    sum_code = 'sum = summary(reg, vcov = sum_vcov)'
-    code_df = bind_rows(code_df,
+    sum_vcov_code = paste0("sum_vcov = ", quote_arg(vcov))
+    sum_code = "sum = summary(reg, vcov = sum_vcov)"
+    code_df = bind_rows(
+      code_df,
       tibble(part = c("sum_vcov","sum"), code = c(sum_vcov_code, sum_code))
     )
   }
@@ -86,6 +91,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   }
   code_df
 }
+
 
 
 fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE) {
@@ -114,6 +120,26 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
   if (se_type %in%  c("iid","cluster","twoway", "conley")) return(se_type)
   if (se_type %in% c("nw", "dk")) return(toupper(se_type))
   return("sandwich")
+}
+
+# Choose default fixest::ssc() settings for translated Stata commands.
+# This centralizes command-specific small sample correction choices.
+fixest_ssc_code_from_reg = function(reg, vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)) {
+  restore.point("fixest_ssc_code_from_reg")
+
+  if (!vcov_type %in% c("cluster", "twoway", "DK", "NW")) {
+    return(NULL)
+  }
+
+  # Stata areg with clustered SEs counts absorbed FE in the finite sample
+  # correction as if the dummy variables had been included explicitly.
+  # The closest fixest default is therefore K.fixef = "full".
+  if (reg$cmd == "areg" && vcov_type %in% c("cluster", "twoway")) {
+    return('fixest::ssc(K.adj = TRUE, K.fixef = "full", G.adj = TRUE)')
+  }
+
+  # Default for other fixest-backed translations.
+  'fixest::ssc()'
 }
 
 

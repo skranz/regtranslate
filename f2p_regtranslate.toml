@@ -16,11 +16,11 @@ Below are relevant files from an R package related to my repbox project
 {{regtranslate}}
 
 
-## Format of proposed changes to code  files
+# Format of proposed changes to code  files
 
 When you suggest changes to code or text files or completely new files, you MUST use the following format for each modification. Each change must be enclosed in a `!MODIFICATION` block.
 
-### Overall Structure
+## Overall Structure
 
 Each modification block has three parts:
 1.  Start and end markers: `!MODIFICATION {{what}}` and `!END_MODIFICATION {{what}}`, where {{what}} is just a short reference to what is modified, file name or function name with with file. It will not be parsed but makes it easier for a human to understand blocks.
@@ -38,58 +38,103 @@ Each modification block has three parts:
 !END_MODIFICATION {{what}}
 ```
 
-### Modification Scope
-
-Each modification must have the following scope:
-
-* `file` (re-)writes a complete file
-
-My software can account for other scopes, but
-thy are not relevant for your task on this package.
-Here always create code for complee files.
-
----
+We have two possible scopes for modification:
+  - file (replaces complete file) or
+  - function (replaces an R function).
 
 ### **Scope 1: `file`**
 
-Use this to create a new file or to completely rewrite an existing one.
+Use this format to create a new file or to completely rewrite an existing one.
 
 **Required Fields:**
 *   `scope = "file"`
-*   `file` (string): The relative path to the file.
-*   `is_new_file` (boolean): `true` if you are creating a new file, `false` if you are rewriting an existing one.
-*   `description` (string): A brief explanation of the change.
+*   `file` (string): The path to the file. Very important: state the path of the file as shown in the files header above. If there is a complete absolute path, also show the complete absolute path here.
+*   `description` (string): A brief explanation of the change in quotes ""
 
-#### **Example 1.1: Creating a new file**
+### **Example 1.1: Creating or modifying a file**
 !MODIFICATION new_helpers.R
 scope = "file"
-file = "R/new_helpers.R"
-is_new_file = true
+file = "/home/rstudio/myproject/R/new_helpers.R"
 description = "Create a new file for helper functions."
 ---
 ```r
 # A new helper function
-say_hello <- function(name) {
-  paste("Hello,", name)
+say_hello = function(name) {
+  paste0("Hello, ", name)
 }
 ```
 !END_MODIFICATION new_helpers.R
 
-#### **Example 1.2: Rewriting an existing file**
-!MODIFICATION README.md
-scope = "file"
-file = "README.md"
-is_new_file = false
-description = "Rewrite the README to add installation instructions."
+
+## **Scope 2: `function`**
+
+Use this fomrat to replace an existing function or to insert a new function. The new code payload should contain the complete function, including any preceding comments.
+
+### **Fields for replacing an existing function:**
+*   `scope = "function"`
+*   `file` (string): The path to the file. Very important: state the path of the file as shown in the files header above. If there is a complete absolute path, also show the complete absolute path here.
+*   `function_name` (string): The name of the function to be replaced.
+*   `description` (string): A brief explanation of the change in quotes.
+
+### **Fields for inserting a new function:**
+*   `scope = "function"`
+*   `file` (string): The path to the file. Very important: state the path of the file as shown in the files header above. If there is a complete absolute path, also show the complete absolute path here.
+*   `description` (string): A brief explanation of the change, enclose in quotes.
+*   **One of** the following fields to specify the insertion point. They are mutually exclusive.
+    *   `insert_top = true`: Insert at the top of the file.
+    *   `insert_bottom = true`: Insert at the bottom of the file.
+    *   `insert_before_fun = "function_name"`: Insert before the specified function.
+    *   `insert_after_fun = "function_name"`: Insert after the specified function.
+
+
+### **Example 2.1: Replacing an existing function**
+!MODIFICATION calculate_sum utils.R
+scope = "function"
+file = "R/utils.R"
+function_name = "calculate_sum"
+description = "Update `calculate_sum` to handle NA values correctly.""
 ---
-```md
-# My Awesome Project
-
-## Installation
-
-Run `remotes::install_github("user/repo")` to install.
+```r
+#' Calculate the sum of a vector, ignoring NAs
+calculate_sum = function(vec) {
+  sum(vec, na.rm = TRUE)
+}
 ```
-!END_MODIFICATION README.md
+!END_MODIFICATION calculate_sum utils.R
+
+### **Example 2.2: Inserting a new function at the bottom of a file (here was an absolute file path given)**
+!MODIFICATION is_positive in R/utils.R
+scope = "function"
+file = "/home/myuser/mypkg/R/utils.R"
+insert_bottom = true
+description = "Add a new helper function to check for positivity."
+---
+```r
+
+#' Check if a number is positive
+is_positive = function(n) {
+  n > 0
+}
+```
+!END_MODIFICATION is_positive in R/utils.R
+
+### **Example 2.3: Inserting a new function after a specific function**
+!MODIFICATION is_negative in R/utils.R
+scope = "function"
+file = "R/utils.R"
+insert_after_fun = "is_positive"
+description = "Add a new helper function `is_negative` after `is_positive`."
+---
+```r
+
+#' Check if a number is negative
+is_negative = function(n) {
+  n < 0
+}
+```
+
+Important if the file is shown with absolute path in the file contents above also
+use the absolute path in the file = argument in your modification header.
 
 
 
