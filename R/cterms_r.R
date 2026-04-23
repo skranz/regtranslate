@@ -13,6 +13,78 @@ unreplace_cterm_special_symbols = function(cterms) {
 }
 
 
+replace_cterms_dot = function(cterms) {
+  cterms = as.character(cterms)
+
+  if (length(cterms)==0) {
+    return(cterms)
+  }
+
+  # 1. Expand compact chained TS prefixes, e.g.
+  # LD.x1 -> L.D.x1
+  # L2D3S4.x1 -> L2.D3.S4.x1
+  repeat {
+    new_cterms = gsub(
+      "(^|#|@|\\.)([LlFfDdSsOo][0-9]*)([LlFfDdSsOo][0-9]*)(?=[@\\.])",
+      "\\1\\2.\\3",
+      cterms,
+      perl = TRUE
+    )
+    if (identical(new_cterms, cterms)) {
+      break
+    }
+    cterms = new_cterms
+  }
+
+  # 2. Canonicalize TS operators to upper case and drop explicit 1
+  # d.  -> D.
+  # d@  -> D@
+  # l1. -> L.
+  # l1@ -> L@
+  ops = c("l", "f", "d", "s", "o")
+  for (op in ops) {
+    OP = toupper(op)
+
+    cterms = gsub(
+      paste0("(^|#|@|\\.)([", op, OP, "])1(?=[@\\.])"),
+      paste0("\\1", OP),
+      cterms,
+      perl = TRUE
+    )
+
+    cterms = gsub(
+      paste0("(^|#|@|\\.)([", op, OP, "])([0-9]+)(?=[@\\.])"),
+      paste0("\\1", OP, "\\3"),
+      cterms,
+      perl = TRUE
+    )
+
+    cterms = gsub(
+      paste0("(^|#|@|\\.)([", op, OP, "])(?=[@\\.])"),
+      paste0("\\1", OP),
+      cterms,
+      perl = TRUE
+    )
+  }
+
+  # 3. Convert only dots that separate actual TS prefixes from the next token.
+  # Do not touch decimal points in factor levels such as x1=-1.874.
+  repeat {
+    new_cterms = gsub(
+      "(^|#|@)([LFDSO][0-9]*)\\.",
+      "\\1\\2@",
+      cterms,
+      perl = TRUE
+    )
+    if (identical(new_cterms, cterms)) {
+      break
+    }
+    cterms = new_cterms
+  }
+
+  cterms
+}
+
 # We might put these functions back to repboxReg
 cterm_of_r_coefs = function(terms, regvar, rcmd=NULL, dot_to_at=from_stata, from_stata=TRUE) {
   restore.point("cterm_of_r_coefs")
@@ -38,7 +110,7 @@ cterm_of_r_coefs_fixest = function(terms, regvar, dot_to_at=FALSE) {
   terms = gsub(factor.rx,"\\1=",terms,fixed=FALSE)
 
   if (dot_to_at) {
-    terms = gsub(".","@", terms, fixed=TRUE)
+    terms = replace_cterms_dot(terms)
   }
 
   rows = which(startsWith(terms,"fit_"))
