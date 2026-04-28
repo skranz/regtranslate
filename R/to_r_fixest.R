@@ -124,22 +124,29 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
 
 # Choose default fixest::ssc() settings for translated Stata commands.
 # This centralizes command-specific small sample correction choices.
+# Choose default fixest::ssc() settings for translated Stata commands.
+# This centralizes command-specific small sample correction choices.
 fixest_ssc_code_from_reg = function(reg, vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)) {
   restore.point("fixest_ssc_code_from_reg")
 
-  if (!vcov_type %in% c("cluster", "twoway", "DK", "NW")) {
-    return(NULL)
+  is_ml = reg$cmd %in% c("logit", "xtlogit", "probit", "xtprobit", "dprobit", "poisson", "xtpoisson", "nbreg", "gnbreg", "clogit")
+
+  if (vcov_type %in% c("cluster", "twoway", "DK", "NW")) {
+    if (reg$cmd == "areg") {
+      return('fixest::ssc(K.adj = TRUE, K.fixef = "full", G.adj = TRUE)')
+    }
+    if (is_ml) {
+      return("fixest::ssc(K.adj = TRUE, G.adj = TRUE)")
+      #return('fixest::ssc(adj = FALSE, cluster.adj = TRUE)')
+    }
+    return('fixest::ssc()')
   }
 
-  # Stata areg with clustered SEs counts absorbed FE in the finite sample
-  # correction as if the dummy variables had been included explicitly.
-  # The closest fixest default is therefore K.fixef = "full".
-  if (reg$cmd == "areg" && vcov_type %in% c("cluster", "twoway")) {
-    return('fixest::ssc(K.adj = TRUE, K.fixef = "full", G.adj = TRUE)')
+  if (is_ml) {
+    return('fixest::ssc(K.adj = TRUE, G.adj = TRUE)')
   }
 
-  # Default for other fixest-backed translations.
-  'fixest::ssc()'
+  return('fixest::ssc()')
 }
 
 
