@@ -1,13 +1,14 @@
 
 # Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 # Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
+# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_fixest")
 
   org_depvars = regvar$cterm[regvar$role=="dep"]
   mod_depvars = replace_cterm_special_symbols(org_depvars)
 
-  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
   vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
   ssc_expr = fixest_ssc_code_from_reg(reg, vcov_type = vcov_type)
@@ -159,7 +160,11 @@ fixest_ssc_code_from_reg = function(reg, vcov_type = fixest_vcov_type_from_regdb
 # which regvar was generated. E.g. it would be create
 # if we could translate both a stata command and an R command to
 # fixest
-regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
+# Ideally this is independent of the original language from
+# which regvar was generated. E.g. it would be create
+# if we could translate both a stata command and an R command to
+# fixest
+regvar_to_formula_fixest = function(regvar, regxvar, cmdpart, reg = NULL) {
   restore.point("regvar_to_formula_fixest")
 
   add_main_effects = TRUE
@@ -185,24 +190,29 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   depvars = replace_cterm_special_symbols(depvars)
   form = paste0(paste0("`",depvars,"`", collapse=" + "), " ~ ")
 
-
-
-  omit_constant = any(cmdpart$part=="opt" & cmdpart$content=="nocons")
-  if (omit_constant) {
-    form = paste0(form, "0 + ")
+  omit_constant = FALSE
+  if (!is.null(reg) && "flags" %in% names(reg)) {
+    omit_constant = stringi::stri_detect_fixed(reg$flags, "noconst")
+  } else if (!is.null(cmdpart)) {
+    omit_constant = any(cmdpart$part=="opt" & startsWith(tolower(cmdpart$content), "nocon"))
   }
 
-  # Create xvariables from regxvars this
-  # means we have manually expanded factors and interaction terms
+  rhs_terms = character()
+  if (omit_constant) {
+    rhs_terms = c(rhs_terms, "0")
+  }
 
   # Exogeneous x that are no FE
   rows = which(rxv$role == "exo")
   if (sum(rows)>0) {
-    form = paste0(form, paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+    rhs_terms = c(rhs_terms, paste0("`",rxv$cterm[rows],"`"))
   } else {
-    # add explicit constant if no x variables
-    form = paste0(form, "1")
+    if (!omit_constant) {
+      rhs_terms = c(rhs_terms, "1")
+    }
   }
+
+  form = paste0(form, paste0(rhs_terms, collapse= " + "))
 
   # Exogeneous x as FE
   rows = which(rv$role == "exo" & rv$absorbed_fe)
@@ -245,7 +255,11 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
 # which regvar was generated. E.g. it would be create
 # if we could translate both a stata command and an R command to
 # fixest
-regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
+# Ideally this is independent of the original language from
+# which regvar was generated. E.g. it would be create
+# if we could translate both a stata command and an R command to
+# fixest
+regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart, reg = NULL) {
   restore.point("regvar_to_formula_fixest")
 
   add_main_effects = TRUE
@@ -259,20 +273,23 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
   # We replace prefix @ with .
   #rv = replace_regvar_prefix_sep(rv, "@",".")
 
-
   depvars = rv$cterm[rv$role=="dep"]
   form = paste0(paste0(depvars, collapse=" + "), " ~ ")
 
-
-  omit_constant = any(cmdpart$part=="opt" & cmdpart$content=="nocons")
-  if (omit_constant) {
-    form = paste0(form, "0 + ")
+  omit_constant = FALSE
+  if (!is.null(reg) && "flags" %in% names(reg)) {
+    omit_constant = stringi::stri_detect_fixed(reg$flags, "noconst")
+  } else if (!is.null(cmdpart)) {
+    omit_constant = any(cmdpart$part=="opt" & startsWith(tolower(cmdpart$content), "nocon"))
   }
 
+  rhs_terms = character()
+  if (omit_constant) {
+    rhs_terms = c(rhs_terms, "0")
+  }
 
   # In stata x variables starting with o. like o.var will be omitted
   rv = rv %>% filter(prefix!="o")
-
 
   # TO DO: Specify whether in interaction A*B also A and B
   #        should be included or not.
@@ -311,7 +328,6 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
     ia = NULL
   }
 
-
   no_ia = rv %>%
     filter(!is_ia) %>%
     mutate(
@@ -328,8 +344,14 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
   # Exogeneous x that are no FE
   rows = which(terms$role == "exo" & !terms$absorbed_fe)
   if (sum(rows)>0) {
-    form = paste0(form, paste0(terms$x_expr[rows], collapse= " + "))
+    rhs_terms = c(rhs_terms, terms$x_expr[rows])
+  } else {
+    if (!omit_constant) {
+      rhs_terms = c(rhs_terms, "1")
+    }
   }
+
+  form = paste0(form, paste0(rhs_terms, collapse= " + "))
 
   # Exogeneous x as FE
   rows = which(terms$role == "exo" & terms$absorbed_fe)

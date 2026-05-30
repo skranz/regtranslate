@@ -44,7 +44,7 @@ reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest"
     stop(paste0("The Stata command ", reg$cmd, " is neither implemented for translation nor specified in stata_cmds_without_r_translation()"))
   }
 
-  args = list(regvar=regvar,regxvar, cmdpart=cmdpart)
+  args = list(regvar=regvar,regxvar=regxvar, cmdpart=cmdpart, reg=reg)
   fun = paste0("regvar_to_formula_",r_cmd)
   res = do.call(fun, args)
   as.formula(res)

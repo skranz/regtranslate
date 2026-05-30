@@ -1,11 +1,12 @@
 # TO DO: VCOV
+# TO DO: VCOV
 stata_to_r_code_lm = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_lm")
 
   org_depvars = regvar$cterm[regvar$role=="dep"]
   mod_depvars = replace_cterm_special_symbols(org_depvars)
 
-  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
   command = "lm"
   arg_str = c(
@@ -62,6 +63,6 @@ stata_to_r_code_lm = function(reg, regvar, regxvar, cmdpart, opts=code_options()
   code_df
 }
 
-regvar_to_formula_lm = function(regvar, regxvar, cmdpart) {
-  regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+regvar_to_formula_lm = function(regvar, regxvar, cmdpart, reg = NULL) {
+  regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 }

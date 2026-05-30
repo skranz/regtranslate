@@ -19,7 +19,7 @@ stata_to_r_code_mfx = function(reg, regvar, regxvar, cmdpart, opts=code_options(
   #regvar = filter(regvar, !is_dropped | ia_cterm != cterm)
 
   # Currently we just use the fixest formula
-  formula = regvar_to_formula_fixest(regvar,regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar,regxvar, cmdpart, reg = reg)
 
   cmd = reg$cmd
   if (cmd=="dprobit") {
