@@ -67,9 +67,9 @@ get_stata_to_r_cmd = function(cmd, prefer = NULL) {
 stata_to_r_cmds_df = function(cmd) {
   li = list(
     # If you add commands here make to sure that you update the to_r_fixest.R code
-    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","reghdfe","xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit"),
+    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit"),
     lm.. = c("regress","reg"),
-    ivreg.. = c("ivregress","ivreg","ivreg2"),
+    ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
     quantreg.. = c("qreg"),
     # Note that parmest does return coefficients not marginal
     # effects for dprobit. So we don't use mfx
