@@ -51,11 +51,6 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
     arg_str = c(arg_str, "ssc = ssc")
   }
 
-  weight_var = regvar$cterm[regvar$role == "weight"]
-  if (length(weight_var)>0) {
-    arg_str = c(arg_str, paste0("weights = ~", paste0(weight_var, collapse="+")))
-  }
-
   library_code = "library(fixest)"
   rcmd_code = paste0('rcmd = "',command,'"')
   if (all(org_depvars==mod_depvars)) {
@@ -66,6 +61,16 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
       collapse="\n"
     )
   }
+
+  # Apply dynamic weights via centralized helper
+  wt = r_weight_code(reg, template = "~ `%s`")
+  if (nzchar(wt$data_code)) {
+    data_code = if (nzchar(data_code)) paste0(data_code, "\n", wt$data_code) else wt$data_code
+  }
+  if (nzchar(wt$weight_arg)) {
+    arg_str = c(arg_str, wt$weight_arg)
+  }
+
   ssc_code = if (use_ssc) paste0("ssc = ", ssc_expr) else NULL
   formula_code = paste0("formula = ", formula)
   reg_vcov_code = paste0("reg_vcov = ", quote_arg(reg_vcov))

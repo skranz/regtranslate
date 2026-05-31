@@ -32,18 +32,22 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
     arg_str
   )
 
-  weight_var = regvar$cterm[regvar$role == "weight"]
-  if (length(weight_var)==1) {
-    arg_str = c(arg_str, paste0('weights = dat[["',weight_var,'"]]'))
-  } else if (length(weight_var)>1) {
-    stop("Cannot deal with mutliple weight variables.")
-  }
+  data_code = ""
 
+  # Apply dynamic weights via centralized helper
+  wt = r_weight_code(reg, template = "dat[['%s']]")
+  if (nzchar(wt$data_code)) {
+    data_code = wt$data_code
+  }
+  if (nzchar(wt$weight_arg)) {
+    arg_str = c(arg_str, wt$weight_arg)
+  }
 
   reg_code = paste0('reg = ', rcmd,'(', paste0(arg_str, collapse=","),")
 class(reg) = 'survreg'")
 
-  code_df = tibble(part = c("library", "rcmd","formula","reg"), code = c(library_code, rcmd_code,formula_code,reg_code))
+  code_df = tibble(part = c("library", "rcmd","data","formula","reg"), code = c(library_code, rcmd_code,data_code,formula_code,reg_code))
+  code_df = code_df[code_df$code != "", ]
 
   if (opts$add_broom) {
     code_df = add_reg_broom_code(code_df, use_summary=FALSE, use_conf_int=TRUE)
