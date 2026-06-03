@@ -14,3 +14,4 @@ R/to_r_mfx.R
 R/to_r_quantreg.R
 R/to_r.R
 R/to_r_tobit.R
+R/weights.R

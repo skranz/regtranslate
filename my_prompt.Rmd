@@ -1,9 +1,8 @@
 
-Below are relevant files of my R package regtranslate. Can you check where the default ssc arguments for translation (possibly depending on the Stata command) are specified? How can be best adapt the code to set these defaults. In particular for areg to fixest translations we want as default:
+Below are relevant files from an R package related to my repbox project
 
-ssc(K.fixef = "full")
+# Package regtranslate
 
-Explain and then propose the concrete code changes.
 
 # FILE: /home/rstudio/repbox/regtranslate/DESCRIPTION
 ```
@@ -41,6 +40,78 @@ unreplace_cterm_special_symbols = function(cterms) {
 }
 
 
+replace_cterms_dot = function(cterms) {
+  cterms = as.character(cterms)
+
+  if (length(cterms)==0) {
+    return(cterms)
+  }
+
+  # 1. Expand compact chained TS prefixes, e.g.
+  # LD.x1 -> L.D.x1
+  # L2D3S4.x1 -> L2.D3.S4.x1
+  repeat {
+    new_cterms = gsub(
+      "(^|#|@|\\.)([LlFfDdSsOo][0-9]*)([LlFfDdSsOo][0-9]*)(?=[@\\.])",
+      "\\1\\2.\\3",
+      cterms,
+      perl = TRUE
+    )
+    if (identical(new_cterms, cterms)) {
+      break
+    }
+    cterms = new_cterms
+  }
+
+  # 2. Canonicalize TS operators to upper case and drop explicit 1
+  # d.  -> D.
+  # d@  -> D@
+  # l1. -> L.
+  # l1@ -> L@
+  ops = c("l", "f", "d", "s", "o")
+  for (op in ops) {
+    OP = toupper(op)
+
+    cterms = gsub(
+      paste0("(^|#|@|\\.)([", op, OP, "])1(?=[@\\.])"),
+      paste0("\\1", OP),
+      cterms,
+      perl = TRUE
+    )
+
+    cterms = gsub(
+      paste0("(^|#|@|\\.)([", op, OP, "])([0-9]+)(?=[@\\.])"),
+      paste0("\\1", OP, "\\3"),
+      cterms,
+      perl = TRUE
+    )
+
+    cterms = gsub(
+      paste0("(^|#|@|\\.)([", op, OP, "])(?=[@\\.])"),
+      paste0("\\1", OP),
+      cterms,
+      perl = TRUE
+    )
+  }
+
+  # 3. Convert only dots that separate actual TS prefixes from the next token.
+  # Do not touch decimal points in factor levels such as x1=-1.874.
+  repeat {
+    new_cterms = gsub(
+      "(^|#|@)([LFDSO][0-9]*)\\.",
+      "\\1\\2@",
+      cterms,
+      perl = TRUE
+    )
+    if (identical(new_cterms, cterms)) {
+      break
+    }
+    cterms = new_cterms
+  }
+
+  cterms
+}
+
 # We might put these functions back to repboxReg
 cterm_of_r_coefs = function(terms, regvar, rcmd=NULL, dot_to_at=from_stata, from_stata=TRUE) {
   restore.point("cterm_of_r_coefs")
@@ -66,7 +137,7 @@ cterm_of_r_coefs_fixest = function(terms, regvar, dot_to_at=FALSE) {
   terms = gsub(factor.rx,"\\1=",terms,fixed=FALSE)
 
   if (dot_to_at) {
-    terms = gsub(".","@", terms, fixed=TRUE)
+    terms = replace_cterms_dot(terms)
   }
 
   rows = which(startsWith(terms,"fit_"))
@@ -1111,17 +1182,20 @@ split_and_sort = function(terms, split = "#", ..., k = NULL) {
 ```
 
 # Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
+# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
+# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_fixest")
 
   org_depvars = regvar$cterm[regvar$role=="dep"]
   mod_depvars = replace_cterm_special_symbols(org_depvars)
 
-  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
   vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+  ssc_expr = fixest_ssc_code_from_reg(reg, vcov_type = vcov_type)
+  use_ssc = !is.null(ssc_expr)
 
-  use_ssc = vcov_type %in% c("cluster","twoway","DK","NW")
   use_sandwich = (vcov_type == "sandwich") | opts$prefer_sandwich
   use_summary = use_sandwich | opts$prefer_summary
 
@@ -1149,19 +1223,14 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   arg_str = c(
     paste0("fml = formula"),
-    paste0('data = dat'),
-    paste0('vcov = reg_vcov'),
+    paste0("data = dat"),
+    paste0("vcov = reg_vcov"),
     arg_str
   )
 
-  # Pass ssc to feols natively
+  # Pass ssc to fixest natively when relevant.
   if (use_ssc) {
     arg_str = c(arg_str, "ssc = ssc")
-  }
-
-  weight_var = regvar$cterm[regvar$role == "weight"]
-  if (length(weight_var)>0) {
-    arg_str = c(arg_str, paste0("weights = ~", paste0(weight_var, collapse="+")))
   }
 
   library_code = "library(fixest)"
@@ -1174,18 +1243,31 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
       collapse="\n"
     )
   }
-  ssc_code = paste0('ssc=fixest::ssc()')
-  formula_code = paste0('formula = ', formula)
-  reg_vcov_code = paste0('reg_vcov = ', quote_arg(reg_vcov))
-  reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
 
-  code_df = tibble(part = c("library", "rcmd","data","formula", if (use_ssc) "ssc", "reg_vcov","reg"),
-                   code = c(library_code, rcmd_code,data_code, formula_code,if (use_ssc) ssc_code, reg_vcov_code, reg_code))
+  # Apply dynamic weights via centralized helper
+  wt = r_weight_code(reg, template = "~ `%s`")
+  if (nzchar(wt$data_code)) {
+    data_code = if (nzchar(data_code)) paste0(data_code, "\n", wt$data_code) else wt$data_code
+  }
+  if (nzchar(wt$weight_arg)) {
+    arg_str = c(arg_str, wt$weight_arg)
+  }
+
+  ssc_code = if (use_ssc) paste0("ssc = ", ssc_expr) else NULL
+  formula_code = paste0("formula = ", formula)
+  reg_vcov_code = paste0("reg_vcov = ", quote_arg(reg_vcov))
+  reg_code = paste0("reg = ", command, "(", paste0(arg_str, collapse=","), ")")
+
+  code_df = tibble(
+    part = c("library", "rcmd", "data", "formula", if (use_ssc) "ssc", "reg_vcov", "reg"),
+    code = c(library_code, rcmd_code, data_code, formula_code, if (use_ssc) ssc_code, reg_vcov_code, reg_code)
+  )
 
   if (use_summary) {
-    sum_vcov_code = paste0('sum_vcov = ', quote_arg(vcov))
-    sum_code = 'sum = summary(reg, vcov = sum_vcov)'
-    code_df = bind_rows(code_df,
+    sum_vcov_code = paste0("sum_vcov = ", quote_arg(vcov))
+    sum_code = "sum = summary(reg, vcov = sum_vcov)"
+    code_df = bind_rows(
+      code_df,
       tibble(part = c("sum_vcov","sum"), code = c(sum_vcov_code, sum_code))
     )
   }
@@ -1197,6 +1279,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   }
   code_df
 }
+
 
 
 fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE) {
@@ -1227,6 +1310,33 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
   return("sandwich")
 }
 
+# Choose default fixest::ssc() settings for translated Stata commands.
+# This centralizes command-specific small sample correction choices.
+# Choose default fixest::ssc() settings for translated Stata commands.
+# This centralizes command-specific small sample correction choices.
+fixest_ssc_code_from_reg = function(reg, vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)) {
+  restore.point("fixest_ssc_code_from_reg")
+
+  is_ml = reg$cmd %in% c("logit", "xtlogit", "probit", "xtprobit", "dprobit", "poisson", "xtpoisson", "nbreg", "gnbreg", "clogit")
+
+  if (vcov_type %in% c("cluster", "twoway", "DK", "NW")) {
+    if (reg$cmd == "areg") {
+      return('fixest::ssc(K.adj = TRUE, K.fixef = "full", G.adj = TRUE)')
+    }
+    if (is_ml) {
+      return("fixest::ssc(K.adj = TRUE, G.adj = TRUE)")
+      #return('fixest::ssc(adj = FALSE, cluster.adj = TRUE)')
+    }
+    return('fixest::ssc()')
+  }
+
+  if (is_ml) {
+    return('fixest::ssc(K.adj = TRUE, G.adj = TRUE)')
+  }
+
+  return('fixest::ssc()')
+}
+
 
 
 # Ideally this is independent of the original language from
@@ -1237,7 +1347,11 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
 # which regvar was generated. E.g. it would be create
 # if we could translate both a stata command and an R command to
 # fixest
-regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
+# Ideally this is independent of the original language from
+# which regvar was generated. E.g. it would be create
+# if we could translate both a stata command and an R command to
+# fixest
+regvar_to_formula_fixest = function(regvar, regxvar, cmdpart, reg = NULL) {
   restore.point("regvar_to_formula_fixest")
 
   add_main_effects = TRUE
@@ -1263,24 +1377,29 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
   depvars = replace_cterm_special_symbols(depvars)
   form = paste0(paste0("`",depvars,"`", collapse=" + "), " ~ ")
 
-
-
-  omit_constant = any(cmdpart$part=="opt" & cmdpart$content=="nocons")
-  if (omit_constant) {
-    form = paste0(form, "0 + ")
+  omit_constant = FALSE
+  if (!is.null(reg) && "flags" %in% names(reg)) {
+    omit_constant = stringi::stri_detect_fixed(reg$flags, "noconst")
+  } else if (!is.null(cmdpart)) {
+    omit_constant = any(cmdpart$part=="opt" & startsWith(tolower(cmdpart$content), "nocon"))
   }
 
-  # Create xvariables from regxvars this
-  # means we have manually expanded factors and interaction terms
+  rhs_terms = character()
+  if (omit_constant) {
+    rhs_terms = c(rhs_terms, "0")
+  }
 
   # Exogeneous x that are no FE
   rows = which(rxv$role == "exo")
   if (sum(rows)>0) {
-    form = paste0(form, paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+    rhs_terms = c(rhs_terms, paste0("`",rxv$cterm[rows],"`"))
   } else {
-    # add explicit constant if no x variables
-    form = paste0(form, "1")
+    if (!omit_constant) {
+      rhs_terms = c(rhs_terms, "1")
+    }
   }
+
+  form = paste0(form, paste0(rhs_terms, collapse= " + "))
 
   # Exogeneous x as FE
   rows = which(rv$role == "exo" & rv$absorbed_fe)
@@ -1323,7 +1442,11 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart) {
 # which regvar was generated. E.g. it would be create
 # if we could translate both a stata command and an R command to
 # fixest
-regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
+# Ideally this is independent of the original language from
+# which regvar was generated. E.g. it would be create
+# if we could translate both a stata command and an R command to
+# fixest
+regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart, reg = NULL) {
   restore.point("regvar_to_formula_fixest")
 
   add_main_effects = TRUE
@@ -1337,20 +1460,23 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
   # We replace prefix @ with .
   #rv = replace_regvar_prefix_sep(rv, "@",".")
 
-
   depvars = rv$cterm[rv$role=="dep"]
   form = paste0(paste0(depvars, collapse=" + "), " ~ ")
 
-
-  omit_constant = any(cmdpart$part=="opt" & cmdpart$content=="nocons")
-  if (omit_constant) {
-    form = paste0(form, "0 + ")
+  omit_constant = FALSE
+  if (!is.null(reg) && "flags" %in% names(reg)) {
+    omit_constant = stringi::stri_detect_fixed(reg$flags, "noconst")
+  } else if (!is.null(cmdpart)) {
+    omit_constant = any(cmdpart$part=="opt" & startsWith(tolower(cmdpart$content), "nocon"))
   }
 
+  rhs_terms = character()
+  if (omit_constant) {
+    rhs_terms = c(rhs_terms, "0")
+  }
 
   # In stata x variables starting with o. like o.var will be omitted
   rv = rv %>% filter(prefix!="o")
-
 
   # TO DO: Specify whether in interaction A*B also A and B
   #        should be included or not.
@@ -1389,7 +1515,6 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
     ia = NULL
   }
 
-
   no_ia = rv %>%
     filter(!is_ia) %>%
     mutate(
@@ -1406,8 +1531,14 @@ regvar_to_formula_fixest_noregxvar = function(regvar, regxvar, cmdpart) {
   # Exogeneous x that are no FE
   rows = which(terms$role == "exo" & !terms$absorbed_fe)
   if (sum(rows)>0) {
-    form = paste0(form, paste0(terms$x_expr[rows], collapse= " + "))
+    rhs_terms = c(rhs_terms, terms$x_expr[rows])
+  } else {
+    if (!omit_constant) {
+      rhs_terms = c(rhs_terms, "1")
+    }
   }
+
+  form = paste0(form, paste0(rhs_terms, collapse= " + "))
 
   # Exogeneous x as FE
   rows = which(terms$role == "exo" & terms$absorbed_fe)
@@ -1448,24 +1579,20 @@ stata_to_r_code_fixest_fit.old = function(reg, regvar, regxvar, cmdpart, opts=co
 # FILE: /home/rstudio/repbox/regtranslate/R/to_r_lm.R
 ```
 # TO DO: VCOV
+# TO DO: VCOV
 stata_to_r_code_lm = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_lm")
 
   org_depvars = regvar$cterm[regvar$role=="dep"]
   mod_depvars = replace_cterm_special_symbols(org_depvars)
 
-  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
   command = "lm"
   arg_str = c(
     paste0("formula = formula"),
     paste0('data = dat')
   )
-
-  weight_var = regvar$cterm[regvar$role == "weight"]
-  if (length(weight_var)>0) {
-    arg_str = c(arg_str, paste0("weights = dat$", paste0(weight_var, collapse="+")))
-  }
 
   rcmd_code = paste0('rcmd = "',command,'"')
   # We use the default ssc arguments since they are closest to the
@@ -1478,29 +1605,22 @@ stata_to_r_code_lm = function(reg, regvar, regxvar, cmdpart, opts=code_options()
       collapse="\n"
     )
   }
+
+  # Apply dynamic weights via centralized helper
+  wt = r_weight_code(reg, template = "dat[['%s']]")
+  if (nzchar(wt$data_code)) {
+    data_code = if (nzchar(data_code)) paste0(data_code, "\n", wt$data_code) else wt$data_code
+  }
+  if (nzchar(wt$weight_arg)) {
+    arg_str = c(arg_str, wt$weight_arg)
+  }
+
   formula_code = paste0('formula = ', formula)
   reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
 
   code_df = tibble(part = c("rcmd","data","formula", "reg"), code = c(rcmd_code,data_code, formula_code, reg_code))
 
 
-  # vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
-  # use_sandwich = TRUE
-  # use_summary = use_sandwich | opts$prefer_summary
-  #
-  # if (use_sandwich) {
-  #   reg_vcov = "iid"
-  #   vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args)
-  # }
-  #
-  #
-  # if (use_summary) {
-  #   sum_vcov_code = paste0('sum_vcov = ', quote_arg(vcov))
-  #   sum_code = 'sum = summary(reg, vcov = sum_vcov)'
-  #   code_df = bind_rows(code_df,
-  #     tibble(part = c("sum_vcov","sum"), code = c(sum_vcov_code, sum_code))
-  #   )
-  # }
   use_summary=FALSE
   if (opts$add_broom) {
     code_df = add_reg_broom_code(code_df, use_summary=use_summary, use_conf_int=TRUE)
@@ -1511,8 +1631,8 @@ stata_to_r_code_lm = function(reg, regvar, regxvar, cmdpart, opts=code_options()
   code_df
 }
 
-regvar_to_formula_lm = function(regvar, regxvar, cmdpart) {
-  regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+regvar_to_formula_lm = function(regvar, regxvar, cmdpart, reg = NULL) {
+  regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 }
 ```
 # END OF FILE: /home/rstudio/repbox/regtranslate/R/to_r_lm.R
@@ -1543,7 +1663,7 @@ stata_to_r_code_mfx = function(reg, regvar, regxvar, cmdpart, opts=code_options(
   #regvar = filter(regvar, !is_dropped | ia_cterm != cterm)
 
   # Currently we just use the fixest formula
-  formula = regvar_to_formula_fixest(regvar,regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar,regxvar, cmdpart, reg = reg)
 
   cmd = reg$cmd
   if (cmd=="dprobit") {
@@ -1607,7 +1727,7 @@ stata_to_r_code_quantreg = function(reg, regvar,regxvar, cmdpart, opts=code_opti
 
 
   # Currently we just use the fixest formula
-  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
   rcmd = "rq"
 
@@ -1627,11 +1747,15 @@ stata_to_r_code_quantreg = function(reg, regvar,regxvar, cmdpart, opts=code_opti
     arg_str
   )
 
-  weight_var = regvar$cterm[regvar$role == "weight"]
-  if (length(weight_var)==1) {
-    arg_str = c(arg_str, paste0('weights = dat[["',weight_var,'"]]'))
-  } else if (length(weight_var)>1) {
-    stop("Cannot deal with multiple weight variables.")
+  data_code = ""
+
+  # Apply dynamic weights via centralized helper
+  wt = r_weight_code(reg, template = "dat[['%s']]")
+  if (nzchar(wt$data_code)) {
+    data_code = wt$data_code
+  }
+  if (nzchar(wt$weight_arg)) {
+    arg_str = c(arg_str, wt$weight_arg)
   }
 
   opts_df = cmdpart_to_opts_df(cmdpart)
@@ -1643,7 +1767,8 @@ stata_to_r_code_quantreg = function(reg, regvar,regxvar, cmdpart, opts=code_opti
 
   reg_code = paste0('reg = suppressWarnings(', rcmd,'(', paste0(arg_str, collapse=","),"))")
 
-  code_df = tibble(part = c("library", "rcmd","formula","reg"), code = c(library_code, rcmd_code,formula_code,reg_code))
+  code_df = tibble(part = c("library", "rcmd","data","formula","reg"), code = c(library_code, rcmd_code,data_code,formula_code,reg_code))
+  code_df = code_df[code_df$code != "", ]
 
   if (opts$add_broom) {
     code_df = add_reg_broom_code(code_df, use_summary=FALSE, use_conf_int=TRUE)
@@ -1718,7 +1843,7 @@ reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest"
     stop(paste0("The Stata command ", reg$cmd, " is neither implemented for translation nor specified in stata_cmds_without_r_translation()"))
   }
 
-  args = list(regvar=regvar,regxvar, cmdpart=cmdpart)
+  args = list(regvar=regvar,regxvar=regxvar, cmdpart=cmdpart, reg=reg)
   fun = paste0("regvar_to_formula_",r_cmd)
   res = do.call(fun, args)
   as.formula(res)
@@ -1741,9 +1866,9 @@ get_stata_to_r_cmd = function(cmd, prefer = NULL) {
 stata_to_r_cmds_df = function(cmd) {
   li = list(
     # If you add commands here make to sure that you update the to_r_fixest.R code
-    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","reghdfe","xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit"),
+    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit"),
     lm.. = c("regress","reg"),
-    ivreg.. = c("ivregress","ivreg","ivreg2"),
+    ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
     quantreg.. = c("qreg"),
     # Note that parmest does return coefficients not marginal
     # effects for dprobit. So we don't use mfx
@@ -1849,7 +1974,7 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
   #regvar = filter(regvar, !is_dropped | ia_cterm != cterm)
 
   # Currently we just use the fixest formula
-  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart)
+  formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
   rcmd = "tobit"
 
@@ -1875,18 +2000,22 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
     arg_str
   )
 
-  weight_var = regvar$cterm[regvar$role == "weight"]
-  if (length(weight_var)==1) {
-    arg_str = c(arg_str, paste0('weights = dat[["',weight_var,'"]]'))
-  } else if (length(weight_var)>1) {
-    stop("Cannot deal with mutliple weight variables.")
-  }
+  data_code = ""
 
+  # Apply dynamic weights via centralized helper
+  wt = r_weight_code(reg, template = "dat[['%s']]")
+  if (nzchar(wt$data_code)) {
+    data_code = wt$data_code
+  }
+  if (nzchar(wt$weight_arg)) {
+    arg_str = c(arg_str, wt$weight_arg)
+  }
 
   reg_code = paste0('reg = ', rcmd,'(', paste0(arg_str, collapse=","),")
 class(reg) = 'survreg'")
 
-  code_df = tibble(part = c("library", "rcmd","formula","reg"), code = c(library_code, rcmd_code,formula_code,reg_code))
+  code_df = tibble(part = c("library", "rcmd","data","formula","reg"), code = c(library_code, rcmd_code,data_code,formula_code,reg_code))
+  code_df = code_df[code_df$code != "", ]
 
   if (opts$add_broom) {
     code_df = add_reg_broom_code(code_df, use_summary=FALSE, use_conf_int=TRUE)
@@ -1903,6 +2032,54 @@ tidy.tobit <- function(x, ...) {
 }
 ```
 # END OF FILE: /home/rstudio/repbox/regtranslate/R/to_r_tobit.R
+
+-----------------------------------------------------------
+
+
+# FILE: /home/rstudio/repbox/regtranslate/R/weights.R
+```
+#' Translate regression weight configurations into R syntax.
+#'
+#' Evaluates the `weights` and `flags` fields from a `reg` parcel and
+#' constructs two snippets of code:
+#' 1. `data_code`: A string setting up `.weight` if the weight is a mathematical expression.
+#' 2. `weight_arg`: The exact string to inject into the `weights = ...` argument of the regression call.
+#'
+#' @param reg The single-row dataframe of the regression metadata parcel.
+#' @param template A format string denoting how the final weight should be injected.
+#'                 Use `"~ %s"` for fixest/formulas, or `"dat[['%s']]"` for lm/rq/tobit vectors.
+#'
+#' @return A list with `$data_code` and `$weight_arg`
+r_weight_code = function(reg, template = "~ %s") {
+  res = list(data_code = "", weight_arg = "")
+
+  if (!"weights" %in% names(reg)) return(res)
+
+  w_str = reg$weights
+  if (is.na(w_str) || !nzchar(w_str)) return(res)
+
+  flags = if (!is.null(reg$flags) && !is.na(reg$flags)) {
+    strsplit(reg$flags, ",\\s*")[[1]]
+  } else {
+    character(0)
+  }
+
+  if ("weights_non_parseable" %in% flags) {
+    res$weight_arg = "# Weights skipped: non-parseable expression"
+    return(res)
+  }
+
+  if ("weights_expr" %in% flags) {
+    res$data_code = paste0("dat[['.weight']] = with(dat, ", w_str, ")")
+    res$weight_arg = paste0("weights = ", sprintf(template, ".weight"))
+  } else {
+    res$weight_arg = paste0("weights = ", sprintf(template, w_str))
+  }
+
+  return(res)
+}
+```
+# END OF FILE: /home/rstudio/repbox/regtranslate/R/weights.R
 
 -----------------------------------------------------------
 
@@ -2028,6 +2205,11 @@ is_negative = function(n) {
 Important if the file is shown with absolute path in the file contents above also
 use the absolute path in the file = argument in your modification header.
 
+
+
+##################################
+# Your Task
+##################################
 
 
 
