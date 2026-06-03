@@ -21,7 +21,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
     reg_vcov = "iid"
     vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args)
   } else {
-    reg_vcov = fixest_vcov_code_from_regdb(reg$se_type, reg$se_args, vcov_type, quote=FALSE)
+    reg_vcov = fixest_vcov_code_from_regdb(reg$se_type, reg$se_args, vcov_type, quote=FALSE, reg=reg)
     if (use_summary) {
       vcov = reg_vcov
     }
@@ -100,7 +100,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
 
 
-fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE) {
+fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE, reg=NULL) {
   restore.point("fixest_vcov_code_from_regdb")
 
   if (vcov_type %in% c("cluster","twoway")) {
@@ -110,7 +110,39 @@ fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_t
     return(code)
   }
   if (vcov_type %in% c("DK","NW")) {
-    stop("fixest_vcov_code_from_regdb not yet implemented for ", vcov_type)
+    lag = NA_character_
+    if (!is.na(se_args) && nzchar(se_args)) {
+      args = regdb_parse_se_args(se_args)
+      if ("lag" %in% names(args)) lag = args["lag"]
+    }
+
+    timevar = if (!is.null(reg) && !is.na(reg$timevar[1]) && nzchar(reg$timevar[1])) reg$timevar[1] else ""
+    panelvar = if (!is.null(reg) && !is.na(reg$panelvar[1]) && nzchar(reg$panelvar[1])) reg$panelvar[1] else ""
+
+    p_and_t = ""
+    if (panelvar != "" && timevar != "") {
+      p_and_t = paste0("`", panelvar, "` + `", timevar, "`")
+    } else if (timevar != "") {
+      p_and_t = paste0("`", timevar, "`")
+    } else if (panelvar != "") {
+      p_and_t = paste0("`", panelvar, "`")
+    }
+
+    lag_str = ""
+    if (!is.na(lag) && lag != "") {
+      lag_str = paste0("(", lag, ")")
+    }
+
+    if (p_and_t != "") {
+      return(paste0(vcov_type, lag_str, " ~ ", p_and_t))
+    } else {
+      if (lag_str == "") {
+        if (quote) return(paste0('"', vcov_type, '"'))
+        return(vcov_type)
+      } else {
+        return(paste0(vcov_type, lag_str))
+      }
+    }
   }
   if (quote) return(paste0('"',vcov_type,'"'))
   return(vcov_type)
