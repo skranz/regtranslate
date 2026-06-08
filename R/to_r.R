@@ -159,3 +159,22 @@ extract_clustervar_from_se_args = function(se_args) {
   clustervar = args[startsWith(names(args),"cluster")]
   clustervar
 }
+
+#' Generate R code to emulate Stata's listwise deletion (e(sample))
+#'
+#' Stata drops missing values for all variables in the original varlist
+#' *before* omitting collinear terms. Since our R translation explicitly
+#' drops collinear terms from the formula, we need to manually drop NAs
+#' across all original variables to match Stata's e(sample).
+r_listwise_deletion_code = function(regvar) {
+  all_base_cterms = unique(regvar$cterm)
+  all_base_cterms = setdiff(all_base_cterms, c("(Intercept)", ""))
+
+  if (length(all_base_cterms) == 0) return("")
+
+  paste0(
+    "cc_cols = c(", paste0('"', all_base_cterms, '"', collapse=", "), ")\n",
+    "cc_cols = intersect(cc_cols, colnames(dat))\n",
+    "dat = dat[complete.cases(dat[, cc_cols, drop=FALSE]), ]"
+  )
+}

@@ -30,13 +30,13 @@ stata_to_r_code_mfx = function(reg, regvar, regxvar, cmdpart, opts=code_options(
 
   # The exclude='select' arguments avoids overwriting
   # of dplyr's select function
-  library_code = "library(MASS, exclude='select')
-library(mfx)
-  "
+  library_code = "library(MASS, exclude='select')\nlibrary(mfx)\n  "
   rcmd_code = paste0('rcmd = "',rcmd,'"')
   # We use the default ssc arguments since they are closest to the
   # Stata defaults
   formula_code = paste0('formula = ', formula)
+
+  data_code = r_listwise_deletion_code(regvar)
 
   # mfx
   arg_str = NULL
@@ -56,7 +56,8 @@ library(mfx)
   )
 
   reg_code = paste0('reg = ', rcmd,'(', paste0(arg_str, collapse=","),")")
-  code_df = tibble(part = c("library", "rcmd","formula","reg"), code = c(library_code, rcmd_code,formula_code,reg_code))
+  code_df = tibble(part = c("library", "rcmd","data","formula","reg"), code = c(library_code, rcmd_code,data_code,formula_code,reg_code))
+  code_df = code_df[code_df$code != "", ]
 
   if (opts$add_broom) {
     code_df = add_reg_broom_code(code_df, use_summary=FALSE, use_conf_int=TRUE)

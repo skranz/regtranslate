@@ -62,6 +62,12 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
     )
   }
 
+  # Apply explicit listwise deletion to emulate Stata's e(sample)
+  lw_code = r_listwise_deletion_code(regvar)
+  if (nzchar(lw_code)) {
+    data_code = if (nzchar(data_code)) paste0(data_code, "\n", lw_code) else lw_code
+  }
+
   # Apply dynamic weights via centralized helper
   wt = r_weight_code(reg, template = "~ `%s`")
   if (nzchar(wt$data_code)) {
