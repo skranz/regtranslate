@@ -38,6 +38,22 @@ stata_to_r_code_mfx = function(reg, regvar, regxvar, cmdpart, opts=code_options(
 
   data_code = r_listwise_deletion_code(regvar)
 
+  is_binary = reg$cmd %in% c("logit", "xtlogit", "probit", "xtprobit", "dprobit", "clogit", "logistic", "exlogistic")
+  if (is_binary && isTRUE(opts$drop_perfect_predictors)) {
+    mod_depvars = regvar$cterm[regvar$role=="dep"]
+    pred_cols = unique(regxvar$cterm)
+    pred_cols = setdiff(pred_cols, c("(Intercept)", ""))
+    if (length(pred_cols) > 0) {
+      pred_str = paste0('c(', paste0('"', pred_cols, '"', collapse=", "), ')')
+      dp_code = paste0(
+        'dp_cols = intersect(', pred_str, ', colnames(dat))\n',
+        'dp_res = regtranslate::stata_drop_perfect_predictors(dat, "', mod_depvars[1], '", dp_cols, verbose = TRUE)\n',
+        'dat = dp_res$dat'
+      )
+      data_code = paste0(data_code, "\n", dp_code)
+    }
+  }
+
   # mfx
   arg_str = NULL
   if (reg$se_category == "robust") {

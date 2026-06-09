@@ -29,9 +29,11 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   command = "feols"
   arg_str = NULL
-  if (reg$cmd == "ppmlhdfe") {
-    command = "fepos"
-  } else if (reg$cmd %in% c("logit","xtlogit")) {
+  if (reg$cmd %in% c("ppmlhdfe", "poisson", "xtpoisson")) {
+    command = "fepois"
+  } else if (reg$cmd %in% c("nbreg", "gnbreg")) {
+    command = "fenegbin"
+  } else if (reg$cmd %in% c("logit","xtlogit", "clogit")) {
     command = "feglm"
     arg_str = "family=binomial()"
   } else if (reg$cmd %in% c("probit","xtprobit","dprobit")) {
@@ -66,6 +68,23 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   lw_code = r_listwise_deletion_code(regvar)
   if (nzchar(lw_code)) {
     data_code = if (nzchar(data_code)) paste0(data_code, "\n", lw_code) else lw_code
+  }
+
+  is_binary = reg$cmd %in% c("logit", "xtlogit", "probit", "xtprobit", "dprobit", "clogit", "logistic", "exlogistic", "blogit", "glogit", "binreg")
+
+  if (is_binary && isTRUE(opts$drop_perfect_predictors)) {
+    # Check all possible expanded predictors before filtering omitted formulas
+    pred_cols = unique(regxvar$cterm)
+    pred_cols = setdiff(pred_cols, c("(Intercept)", ""))
+    if (length(pred_cols) > 0) {
+      pred_str = paste0('c(', paste0('"', pred_cols, '"', collapse=", "), ')')
+      dp_code = paste0(
+        'dp_cols = intersect(', pred_str, ', colnames(dat))\n',
+        'dp_res = regtranslate::stata_drop_perfect_predictors(dat, "', mod_depvars[1], '", dp_cols, verbose = TRUE)\n',
+        'dat = dp_res$dat'
+      )
+      data_code = paste0(data_code, "\n", dp_code)
+    }
   }
 
   # Apply dynamic weights via centralized helper

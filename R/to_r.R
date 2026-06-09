@@ -15,8 +15,8 @@ example = function() {
 }
 
 
-code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE) {
-  list(prefer_sandwich=prefer_sandwich, prefer_summary=prefer_summary, add_broom=add_broom, add_function=add_function, add_restorepoint=add_restorepoint)
+code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE, drop_perfect_predictors=TRUE) {
+  list(prefer_sandwich=prefer_sandwich, prefer_summary=prefer_summary, add_broom=add_broom, add_function=add_function, add_restorepoint=add_restorepoint, drop_perfect_predictors=drop_perfect_predictors)
 }
 
 reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
@@ -67,14 +67,15 @@ get_stata_to_r_cmd = function(cmd, prefer = NULL) {
 stata_to_r_cmds_df = function(cmd) {
   li = list(
     # If you add commands here make to sure that you update the to_r_fixest.R code
-    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey"),
+    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey", "nbreg", "gnbreg", "poisson", "xtpoisson", "clogit"),
     lm.. = c("regress","reg", "newey"),
     ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
     quantreg.. = c("qreg"),
     # Note that parmest does return coefficients not marginal
     # effects for dprobit. So we don't use mfx
     #mfx... = c("dprobit"),
-    tobit.. = c("tobit")
+    tobit.. = c("tobit"),
+    stcox.. = c("stcox")
   )
   stata_cmd = unlist(li)
   r_cmd = str.left.of(names(stata_cmd),"..")
