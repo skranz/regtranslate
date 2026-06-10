@@ -1,7 +1,5 @@
 
 # Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
-# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
-# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_fixest")
 
@@ -51,6 +49,22 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   # Pass ssc to fixest natively when relevant.
   if (use_ssc) {
     arg_str = c(arg_str, "ssc = ssc")
+  }
+
+  # Handle singleton observations according to Stata behavior
+  if (isTRUE(opts$match_stata_singletons)) {
+    if (reg$cmd %in% c("areg", "xtreg", "xtivreg", "xtivreg2", "xtpoisson", "xtlogit", "xtprobit", "clogit")) {
+      arg_str = c(arg_str, 'fixef.rm = "none"')
+    } else if (reg$cmd %in% c("reghdfe", "ivreghdfe", "ppmlhdfe")) {
+      # reghdfe/ppmlhdfe drops them by default, but allows keepsingletons option
+      keep_singletons = FALSE
+      if (!is.null(cmdpart)) {
+        keep_singletons = any(cmdpart$part == "opt" & startsWith(tolower(cmdpart$content), "keepsingleton"))
+      }
+      if (keep_singletons) {
+        arg_str = c(arg_str, 'fixef.rm = "none"')
+      }
+    }
   }
 
   library_code = "library(fixest)"

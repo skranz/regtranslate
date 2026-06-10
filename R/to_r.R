@@ -15,8 +15,16 @@ example = function() {
 }
 
 
-code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE, drop_perfect_predictors=TRUE) {
-  list(prefer_sandwich=prefer_sandwich, prefer_summary=prefer_summary, add_broom=add_broom, add_function=add_function, add_restorepoint=add_restorepoint, drop_perfect_predictors=drop_perfect_predictors)
+code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE, drop_perfect_predictors=TRUE, match_stata_singletons=TRUE) {
+  list(
+    prefer_sandwich = prefer_sandwich,
+    prefer_summary = prefer_summary,
+    add_broom = add_broom,
+    add_function = add_function,
+    add_restorepoint = add_restorepoint,
+    drop_perfect_predictors = drop_perfect_predictors,
+    match_stata_singletons = match_stata_singletons
+  )
 }
 
 reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
