@@ -31,6 +31,20 @@ reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", o
   args = list(reg=reg, regvar=regvar,regxvar, cmdpart=cmdpart, opts=opts)
   fun = paste0("stata_to_r_code_",r_cmd)
   res = do.call(fun, args)
+
+  # Centralized injection of Date to numeric conversion code
+  if (!is.null(res) && "data" %in% res$part) {
+    date_code = r_date_to_numeric_code(regvar, runid = reg$runid)
+    if (nzchar(date_code)) {
+      data_idx = which(res$part == "data")[1]
+      if (nzchar(res$code[data_idx])) {
+        res$code[data_idx] = paste0(date_code, "\n", res$code[data_idx])
+      } else {
+        res$code[data_idx] = date_code
+      }
+    }
+  }
+
   res
 }
 
@@ -179,3 +193,57 @@ r_listwise_deletion_code = function(regvar) {
     "dat = dat[complete.cases(dat[, cc_cols, drop=FALSE]), ]"
   )
 }
+
+#' Generate R code to convert Date/Datetime variables to numeric
+#'
+#' Fixest and other packages complain if Date variables are used directly as numeric variables.
+#' We also emit a repbox_problem since effect sizes of Dates are hard to interpret.
+r_date_to_numeric_code = function(regvar, runid = NULL) {
+  restore.point("r_date_to_numeric_code")
+  if (!"var_org_type" %in% colnames(regvar)) return("")
+
+  rows = which(regvar$var_org_type  %in% c("Date", "POSIXct", "POSIXt", "difftime") & regvar$var_reg_type == "numeric")
+
+  if (length(rows)==0) return("")
+
+
+  date_vars = unique(regvar$cterm[rows])
+  date_vars = setdiff(date_vars, c("(Intercept)", "", NA))
+
+  if (!is.null(runid)) {
+    msg = paste0("Regression uses Date/Datetime variables as numeric: ", paste(date_vars, collapse=", "), ". Effect sizes might be hard to interpret.")
+    repboxUtils::repbox_problem(msg, type = "date_as_numeric", runid = runid, fail_action = "msg")
+  }
+
+  paste0(
+    'dat = stata_datetime_cols_to_numeric(dat, c(', paste0('"', date_vars, '"', collapse=", "), '))'
+  )
+}
+stata_datetime_cols_to_numeric = function(data, cols = NULL) {
+  stata_date_offset_days = as.numeric(as.Date("1970-01-01") - as.Date("1960-01-01"))
+  stata_datetime_offset_ms = stata_date_offset_days * 24 * 60 * 60 * 1000
+
+  if (is.null(cols)) {
+    is_dt = vapply(data, function(v) {
+      inherits(v, "Date") || inherits(v, "POSIXct")
+    }, logical(1))
+    cols = names(data)[is_dt]
+  }
+
+  if (length(cols) == 0) return(data)
+
+  for (col in cols) {
+    v = data[[col]]
+
+    if (inherits(v, "Date")) {
+      data[[col]] = as.numeric(v) + stata_date_offset_days
+    } else if (inherits(v, "POSIXct")) {
+      data[[col]] = as.numeric(v) * 1000 + stata_datetime_offset_ms
+    } else {
+      warning(sprintf("Column '%s' is not Date or POSIXct; leaving unchanged.", col))
+    }
+  }
+
+  data
+}
+
