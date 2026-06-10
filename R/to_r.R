@@ -197,10 +197,11 @@ r_listwise_deletion_code = function(regvar) {
 
   paste0(
     "cc_cols = c(", paste0('"', all_base_cterms, '"', collapse=", "), ")\n",
-    "cc_cols = intersect(cc_cols, colnames(dat))\n",
-    "dat = dat[complete.cases(dat[, cc_cols, drop=FALSE]), ]"
+    "dat = stata_drop_missing(dat, cc_cols)"
   )
 }
+
+
 
 #' Generate R code to convert Date/Datetime variables to numeric
 #'

@@ -85,3 +85,34 @@ stata_drop_perfect_predictors = function(dat, depvar, indepvars, verbose = TRUE)
 
   list(dat = dat, indepvars = kept_vars)
 }
+
+
+
+#' Emulate Stata's listwise deletion (e(sample))
+#'
+#' Drops NA, but also empty strings ("") and non-finite numbers (Inf, NaN),
+#' which Stata treats as missing values during marksample.
+#' @export
+stata_drop_missing = function(dat, vars) {
+  vars = intersect(vars, colnames(dat))
+  if (length(vars) == 0) return(dat)
+
+  keep = rep(TRUE, nrow(dat))
+  for (v in vars) {
+    val = dat[[v]]
+    if (is.character(val) || is.factor(val)) {
+      char_val = as.character(val)
+      keep = keep & !is.na(char_val) & (char_val != "")
+    } else if (is.numeric(val)) {
+      keep = keep & is.finite(val)
+    } else {
+      keep = keep & !is.na(val)
+    }
+  }
+
+  if (!all(keep)) {
+    dat = dat[keep, , drop = FALSE]
+  }
+  dat
+}
+
