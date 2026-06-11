@@ -2,7 +2,7 @@ sort2_chr = function(a, b, ..., sep=NULL) {
   swap = stringi::stri_cmp_gt(a, b, ...)
   lo = ifelse(swap, b, a)
   hi = ifelse(swap, a, b)
-  if (!is.null(sep)) return(paste0(a,sep,b))
+  if (!is.null(sep)) return(paste0(lo,sep,hi))
   list(lo = lo, hi = hi)
 }
 

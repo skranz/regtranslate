@@ -281,7 +281,7 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart, reg = NULL) {
   # Exogeneous x that are no FE
   rows = which(rxv$role == "exo")
   if (sum(rows)>0) {
-    rhs_terms = c(rhs_terms, paste0("`",rxv$cterm[rows],"`"))
+    rhs_terms = c(rhs_terms, paste0("`",unique(rxv$cterm[rows]),"`"))
   } else {
     if (!omit_constant) {
       rhs_terms = c(rhs_terms, "1")
@@ -310,17 +310,17 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart, reg = NULL) {
         }
       ) %>%
       pull(fe_expr)
-    form = paste0(form, " | ", paste0(fe_terms, collapse = " + "))
+    form = paste0(form, " | ", paste0(unique(fe_terms), collapse = " + "))
   }
 
   # Endogeneous x and instruments (never FE)
   rows = which(rxv$role == "endo")
   if (sum(rows)>0) {
-    form = paste0(form, " | ",paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+    form = paste0(form, " | ",paste0("`",unique(rxv$cterm[rows]),"`", collapse= " + "))
   }
   rows = which(rxv$role == "instr")
   if (sum(rows)>0) {
-    form = paste0(form, " ~ ",paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+    form = paste0(form, " ~ ",paste0("`",unique(rxv$cterm[rows]),"`", collapse= " + "))
   }
   form
 }
