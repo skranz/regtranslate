@@ -22,8 +22,8 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
   } else if (reg$se_category == "cluster") {
     clustervar = extract_clustervar_from_se_args(reg$se_args)
     arg_str = paste0('cluster = "', clustervar[1],'"')
-    if (reg$se_type == "twoway") {
-      stop("Two way clusters not yet implemented for tobit in R")
+    if (reg$se_type %in% c("twoway", "multiway")) {
+      stop("Multiway clusters not yet implemented for tobit in R")
     }
   }
   arg_str = c(

@@ -142,9 +142,9 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE, reg=NULL) {
   restore.point("fixest_vcov_code_from_regdb")
 
-  if (vcov_type %in% c("cluster","twoway")) {
+  if (vcov_type %in% c("cluster","twoway", "multiway")) {
     clustervar = extract_clustervar_from_se_args(se_args)
-    # Return as a formula (~ var1 + var2) natively supported by fixest
+    # Return as a formula (~ var1 + var2 + ...) natively supported by fixest
     code = paste0("~ ", paste0("`", clustervar, "`", collapse = " + "))
     return(code)
   }
@@ -194,7 +194,7 @@ fixest_vcov_type_from_regdb = function(se_type, se_args) {
   restore.point("se_type_to_fixest_vcov")
   if (se_type == "hc1") return("hetero")
   if (se_type %in%  c("cluster")) return(se_type)
-  if (se_type %in%  c("iid","cluster","twoway", "conley")) return(se_type)
+  if (se_type %in%  c("iid","cluster","twoway", "multiway", "conley")) return(se_type)
   if (se_type %in% c("nw", "dk")) return(toupper(se_type))
   return("sandwich")
 }
@@ -208,7 +208,7 @@ fixest_ssc_code_from_reg = function(reg, vcov_type = fixest_vcov_type_from_regdb
 
   is_ml = reg$cmd %in% c("logit", "xtlogit", "probit", "xtprobit", "dprobit", "poisson", "xtpoisson", "nbreg", "gnbreg", "clogit")
 
-  if (vcov_type %in% c("cluster", "twoway", "DK", "NW")) {
+  if (vcov_type %in% c("cluster", "twoway", "multiway", "DK", "NW")) {
     if (reg$cmd == "areg") {
       return('fixest::ssc(K.adj = TRUE, K.fixef = "full", G.adj = TRUE)')
     }
