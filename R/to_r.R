@@ -30,7 +30,7 @@ code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=T
 reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
   restore.point("reg_stata_to_r_code")
 
-  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer)
+  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer, reg = reg)
   if (isTRUE(r_cmd == "no_trans") | is.na(r_cmd)) {
     cat(paste0("The Stata command ", reg$cmd, " is not yet implemented for translation in regtranslate."))
     return(NULL)
@@ -59,7 +59,7 @@ reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", o
 reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
   restore.point("reg_stata_to_r_formula")
 
-  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer)
+  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer, reg = reg)
   if (isTRUE(r_cmd == "no_trans")) {
     return(NULL)
   } else if (is.na(r_cmd)) {
@@ -72,12 +72,21 @@ reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest"
   as.formula(res)
 }
 
-get_stata_to_r_cmd = function(cmd, prefer = NULL) {
+get_stata_to_r_cmd = function(cmd, prefer = NULL, reg = NULL) {
   restore.point("get_stata_to_r_cmd")
   df = stata_to_r_cmds_df()
   rows = df$stata_cmd == cmd
   if (length(rows)==0) return(NA)
   r_cmds = df$r_cmd[rows]
+
+  if (!is.null(reg) && cmd %in% c("xtreg", "xtivreg")) {
+    flags = if (!is.null(reg$flags) && !is.na(reg$flags)) strsplit(reg$flags, ",\\s*")[[1]] else character(0)
+    if ("re" %in% flags || "be" %in% flags || "mle" %in% flags || "pa" %in% flags || "fd" %in% flags) {
+      if ("plm" %in% r_cmds) return("plm")
+      return("plm")
+    }
+  }
+
   if (length(rows)==1 | length(prefer)==0) return(r_cmds[1])
   ma = match(r_cmds, prefer)
   best = which.min(ma)
@@ -90,6 +99,7 @@ stata_to_r_cmds_df = function(cmd) {
   li = list(
     # If you add commands here make to sure that you update the to_r_fixest.R code
     fixest.. = c("regress","reg", "cgmreg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey", "nbreg", "gnbreg", "poisson", "xtpoisson", "clogit"),
+    plm.. = c("xtreg", "xtivreg"),
     lm.. = c("regress","reg", "newey"),
     ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
     quantreg.. = c("qreg"),

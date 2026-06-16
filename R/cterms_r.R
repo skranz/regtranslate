@@ -159,3 +159,22 @@ cterm_of_r_coefs_fixest = function(terms, regvar, dot_to_at=FALSE) {
 #
 #   terms
 # }
+cterm_to_saveterm = function(cterms) {
+  # We use the safe replacements from replace_cterm_special_symbols
+  # instead of raw . and .. to avoid colliding with variables that naturally contain dots
+  replace_cterm_special_symbols(cterms)
+}
+
+saveterm_to_cterm = function(saveterms) {
+  unreplace_cterm_special_symbols(saveterms)
+}
+
+cterm_to_saveterm_cols = function(dat) {
+  colnames(dat) = cterm_to_saveterm(colnames(dat))
+  dat
+}
+
+saveterm_to_cterm_cols = function(dat) {
+  colnames(dat) = saveterm_to_cterm(colnames(dat))
+  dat
+}
