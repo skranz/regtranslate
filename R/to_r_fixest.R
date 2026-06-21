@@ -8,7 +8,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
-  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args, reg$se_category)
   ssc_expr = fixest_ssc_code_from_reg(reg, vcov_type = vcov_type)
   use_ssc = !is.null(ssc_expr)
 
@@ -17,7 +17,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   if (use_sandwich) {
     reg_vcov = "iid"
-    vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args)
+    vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args, reg_info=reg)
   } else {
     reg_vcov = fixest_vcov_code_from_regdb(reg$se_type, reg$se_args, vcov_type, quote=FALSE, reg=reg)
     if (use_summary) {
@@ -189,14 +189,200 @@ fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_t
 
 
 
+fixest_vcov_type_from_regdb = function(se_type, se_args,se_category=NA_character_) {
 
-fixest_vcov_type_from_regdb = function(se_type, se_args) {
-  restore.point("se_type_to_fixest_vcov")
-  if (se_type == "hc1") return("hetero")
-  if (se_type %in%  c("cluster")) return(se_type)
-  if (se_type %in%  c("iid","cluster","twoway", "multiway", "conley")) return(se_type)
-  if (se_type %in% c("nw", "dk")) return(toupper(se_type))
-  return("sandwich")
+  restore.point("fixest_vcov_type_from_regdb ")
+
+  se_type = tolower(trimws(as.character(se_type[1])))
+  se_category = tolower(trimws(as.character(se_category[1])))
+
+  if (is.na(se_type)) se_type = ""
+  if (is.na(se_category)) se_category = ""
+
+  clustervar = tryCatch(
+    extract_clustervar_from_se_args(se_args),
+    error = function(e) character(0)
+  )
+  clustervar = as.character(clustervar)
+  clustervar = clustervar[!is.na(clustervar) & nzchar(clustervar)]
+
+  num_clustervar = length(clustervar)
+  is_cluster = se_category == "cluster" || num_clustervar > 0
+
+  cluster_vcov_type = function() {
+    if (num_clustervar <= 1) return("cluster")
+    if (num_clustervar == 2) return("twoway")
+    "multiway"
+  }
+
+  # Conventional and model-based VCEs are represented by fixest's
+  # native model-based covariance matrix.
+  if (se_type %in% c(
+    "iid", "unadjusted", "conventional", "ols", "oim"
+  )) {
+    return("iid")
+  }
+
+  # fixest implements HC1 under the names hetero, HC1, and White.
+  # Small-sample corrections are handled separately through ssc.
+  if (se_type %in% c("robust", "hc1")) {
+    return("hetero")
+  }
+
+  # Ordinary one-way and multiway clustering are handled natively.
+  # fixest_vcov_code_from_regdb() converts these routing values into
+  # a formula containing the stored cluster variables.
+  if (se_type %in% c("cluster", "twoway", "multiway")) {
+    return(se_type)
+  }
+
+  # fixest implements these time-series, panel, and spatial VCEs natively.
+  if (se_type %in% c("nw", "neweywest", "newey-west")) {
+    return("NW")
+  }
+
+  if (se_type %in% c(
+    "dk", "dkraay", "driscoll-kraay", "driscoll_kraay"
+  )) {
+    return("DK")
+  }
+
+  if (se_type == "conley") {
+    return("conley")
+  }
+
+  # These explicit nonclustered HC estimators are not native fixest
+  # VCOV types. They can be computed by sandwich::vcovHC().
+  if (se_type %in% c("hc0", "hc2", "hc3", "hc4", "hc5")) {
+    if (!is_cluster) {
+      return("sandwich")
+    }
+
+    # Clustered HC2 and HC3 are CR2/CR3-style leverage-adjusted
+    # cluster VCEs. sandwich::vcovCL documents HC2/HC3 only for lm
+    # and glm objects, so use ordinary fixest clustering as fallback.
+    repbox_problem(
+      paste0(
+        "The clustered ", toupper(se_type),
+        " covariance estimator is not translated exactly. ",
+        "Use ordinary fixest cluster-robust standard errors."
+      ),
+      "fixest_cluster_hc_fallback",
+      "msg"
+    )
+    return(cluster_vcov_type())
+  }
+
+  # OPG and generic HAC explicitly imply covariance estimators that are
+  # not available as native fixest VCOV types. Use the sandwich path.
+  if (se_type %in% c("opg", "hac")) {
+    return("sandwich")
+  }
+
+  # sandwich implements bootstrap and jackknife covariance estimators,
+  # but they need not reproduce Stata's exact resampling design and can
+  # be expensive. By default use the corresponding asymptotic fixest VCE.
+  # opts$prefer_sandwich can still explicitly request the resampling path.
+  if (se_type %in% c("bootstrap", "jackknife")) {
+    if (is_cluster && num_clustervar > 0) {
+      fallback = cluster_vcov_type()
+    } else {
+      fallback = "hetero"
+    }
+
+    repbox_problem(
+      paste0(
+        "Stata ", se_type,
+        " standard errors are not reproduced by default. Use ",
+        fallback,
+        " as an asymptotic fixest fallback."
+      ),
+      "fixest_resampling_vcov_fallback",
+      "msg"
+    )
+    return(fallback)
+  }
+
+  # Survey VCEs generally account for heteroskedasticity and potentially
+  # clustering. Without the complete survey design, use clustering when
+  # cluster variables are stored and heteroskedasticity-robust otherwise.
+  if (se_type == "svy") {
+    if (is_cluster && num_clustervar > 0) {
+      fallback = cluster_vcov_type()
+    } else {
+      fallback = "hetero"
+    }
+
+    repbox_problem(
+      paste0(
+        "The complete Stata survey design is unavailable. Use ",
+        fallback,
+        " as the fixest VCOV fallback."
+      ),
+      "fixest_svy_vcov_fallback",
+      "msg"
+    )
+    return(fallback)
+  }
+
+  # Rubin's multiple-imputation variance cannot be reconstructed from a
+  # single fixest estimation. The model-based VCE is the neutral fallback.
+  if (se_type == "mi") {
+    repbox_problem(
+      paste0(
+        "Multiple-imputation variance combination is not implemented. ",
+        "Use fixest iid standard errors."
+      ),
+      "fixest_mi_vcov_fallback",
+      "msg"
+    )
+    return("iid")
+  }
+
+  # For unknown exact types, retain the broad RepDB category where that
+  # gives a runnable and economically meaningful approximation.
+  if (se_category == "iid") {
+    return("iid")
+  }
+
+  if (se_category == "robust") {
+    repbox_problem(
+      paste0(
+        "Unknown robust standard error type '", se_type,
+        "'. Use fixest heteroskedasticity-robust standard errors."
+      ),
+      "unknown_fixest_robust_vcov",
+      "msg"
+    )
+    return("hetero")
+  }
+
+  if (se_category == "cluster" && num_clustervar > 0) {
+    fallback = cluster_vcov_type()
+
+    repbox_problem(
+      paste0(
+        "Unknown clustered standard error type '", se_type,
+        "'. Use ordinary ", fallback,
+        " cluster-robust standard errors."
+      ),
+      "unknown_fixest_cluster_vcov",
+      "msg"
+    )
+    return(fallback)
+  }
+
+  # No reliable information about the VCE remains. IID is preferable to
+  # invoking an unrelated sandwich estimator merely because it is robust.
+  repbox_problem(
+    paste0(
+      "No fixest VCOV mapping is implemented for standard error type '",
+      se_type, "'. Use iid standard errors."
+    ),
+    "unknown_fixest_vcov",
+    "msg"
+  )
+  return("iid")
 }
 
 # Choose default fixest::ssc() settings for translated Stata commands.
