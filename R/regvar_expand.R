@@ -112,9 +112,9 @@ make_ia2_vars = function(rv, dat, level_li) {
   }
 
   grid = expand.grid(var1=vars1, var2=vars2,stringsAsFactors = FALSE) %>%
-    mutate(var12 = sort2_chr(var1, var2, "#"))
+    mutate(var12 = sort2_chr(var1, var2, sep="#"))
 
-  dat12_li = lapply(seq_rows(grid), function(i) {
+  dat12_li = lapply(seq_len(nrow(grid)), function(i) {
     if (is_factor1) {
       val1 = fdat[[grid$var1[i]]]
     } else {
@@ -130,7 +130,11 @@ make_ia2_vars = function(rv, dat, level_li) {
   names(dat12_li) = grid$var12
   dat12 = as_tibble(dat12_li)
 
-  bind_cols(fdat, dat12)
+  if (is.null(rv$add_main_effects) || isTRUE(rv$add_main_effects[1])) {
+    return(bind_cols(fdat, dat12))
+  } else {
+    return(dat12)
+  }
 }
 
 # FILE: regtranslate/regvar_expand.R
@@ -154,23 +158,27 @@ make_ia3_vars = function(rv, dat, level_li) {
   vars3 = if (is_f3) paste0(rv$cterm[3],"=", level_li[[rv$cterm[3]]]) else rv$cterm[3]
 
   # 2-way grids
-  g12 = expand.grid(v1=vars1, v2=vars2, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
-  g13 = expand.grid(v1=vars1, v2=vars3, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
-  g23 = expand.grid(v1=vars2, v2=vars3, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
+  g12 = expand.grid(a=vars1, b=vars2, stringsAsFactors=FALSE) %>% mutate(res = sort2_chr(a, b, sep="#"))
+  g13 = expand.grid(a=vars1, b=vars3, stringsAsFactors=FALSE) %>% mutate(res = sort2_chr(a, b, sep="#"))
+  g23 = expand.grid(a=vars2, b=vars3, stringsAsFactors=FALSE) %>% mutate(res = sort2_chr(a, b, sep="#"))
 
   # 3-way grid
-  g123 = expand.grid(v1=vars1, v2=vars2, v3=vars3, stringsAsFactors=FALSE) %>%
-    mutate(var = split_and_sort(paste0(v1, "#", v2, "#", v3), split="#", k=3L))
+  g123 = expand.grid(a=vars1, b=vars2, c=vars3, stringsAsFactors=FALSE) %>%
+    mutate(res = split_and_sort(paste0(a, "#", b, "#", c), split="#", k=3L))
 
   # Compute values
   get_val = function(is_f, grid_col, i) if (is_f) fdat[[grid_col[i]]] else dat[[grid_col[i]]]
 
-  dat12 = as_tibble(setNames(lapply(seq_rows(g12), function(i) get_val(is_f1, g12$v1, i) * get_val(is_f2, g12$v2, i)), g12$var))
-  dat13 = as_tibble(setNames(lapply(seq_rows(g13), function(i) get_val(is_f1, g13$v1, i) * get_val(is_f3, g13$v2, i)), g13$var))
-  dat23 = as_tibble(setNames(lapply(seq_rows(g23), function(i) get_val(is_f2, g23$v1, i) * get_val(is_f3, g23$v2, i)), g23$var))
-  dat123 = as_tibble(setNames(lapply(seq_rows(g123), function(i) get_val(is_f1, g123$v1, i) * get_val(is_f2, g123$v2, i) * get_val(is_f3, g123$v3, i)), g123$var))
+  dat12 = as_tibble(setNames(lapply(seq_len(nrow(g12)), function(i) get_val(is_f1, g12$a, i) * get_val(is_f2, g12$b, i)), g12$res))
+  dat13 = as_tibble(setNames(lapply(seq_len(nrow(g13)), function(i) get_val(is_f1, g13$a, i) * get_val(is_f3, g13$b, i)), g13$res))
+  dat23 = as_tibble(setNames(lapply(seq_len(nrow(g23)), function(i) get_val(is_f2, g23$a, i) * get_val(is_f3, g23$b, i)), g23$res))
+  dat123 = as_tibble(setNames(lapply(seq_len(nrow(g123)), function(i) get_val(is_f1, g123$a, i) * get_val(is_f2, g123$b, i) * get_val(is_f3, g123$c, i)), g123$res))
 
-  bind_cols(fdat, dat12, dat13, dat23, dat123)
+  if (is.null(rv$add_main_effects) || isTRUE(rv$add_main_effects[1])) {
+    return(bind_cols(fdat, dat12, dat13, dat23, dat123))
+  } else {
+    return(dat123)
+  }
 }
 
 make_factor_level_vars = function(var,dat, levels = level_li[[var]],level_li) {
