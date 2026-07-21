@@ -186,13 +186,32 @@ cterm_of_r_coefs_fixest = function(terms, regvar, dot_to_at=FALSE) {
 #
 #   terms
 # }
+cterm_to_saveterm = function(cterms) {
+  # We use the safe replacements from replace_cterm_special_symbols
+  # instead of raw . and .. to avoid colliding with variables that naturally contain dots
+  replace_cterm_special_symbols(cterms)
+}
+
+saveterm_to_cterm = function(saveterms) {
+  unreplace_cterm_special_symbols(saveterms)
+}
+
+cterm_to_saveterm_cols = function(dat) {
+  colnames(dat) = cterm_to_saveterm(colnames(dat))
+  dat
+}
+
+saveterm_to_cterm_cols = function(dat) {
+  colnames(dat) = saveterm_to_cterm(colnames(dat))
+  dat
+}
 ```
 # END OF FILE: /home/rstudio/repbox/regtranslate/R/cterms_r.R
 
 -----------------------------------------------------------
 
 
-# FILE: /home/rstudio/repbox/regtranslate/R/drop_perfect_predictors.R
+# FILE: /home/rstudio/repbox/regtranslate/R/drop_like_stata.R
 ```
 #' Drop perfect predictors for binary outcome models
 #'
@@ -281,8 +300,39 @@ stata_drop_perfect_predictors = function(dat, depvar, indepvars, verbose = TRUE)
 
   list(dat = dat, indepvars = kept_vars)
 }
+
+
+
+#' Emulate Stata's listwise deletion (e(sample))
+#'
+#' Drops NA, but also empty strings ("") and non-finite numbers (Inf, NaN),
+#' which Stata treats as missing values during marksample.
+#' @export
+stata_drop_missing = function(dat, vars) {
+  vars = intersect(vars, colnames(dat))
+  if (length(vars) == 0) return(dat)
+
+  keep = rep(TRUE, nrow(dat))
+  for (v in vars) {
+    val = dat[[v]]
+    if (is.character(val) || is.factor(val)) {
+      char_val = as.character(val)
+      keep = keep & !is.na(char_val) & (char_val != "")
+    } else if (is.numeric(val)) {
+      keep = keep & is.finite(val)
+    } else {
+      keep = keep & !is.na(val)
+    }
+  }
+
+  if (!all(keep)) {
+    dat = dat[keep, , drop = FALSE]
+  }
+  dat
+}
+
 ```
-# END OF FILE: /home/rstudio/repbox/regtranslate/R/drop_perfect_predictors.R
+# END OF FILE: /home/rstudio/repbox/regtranslate/R/drop_like_stata.R
 
 -----------------------------------------------------------
 
@@ -933,9 +983,9 @@ make_ia2_vars = function(rv, dat, level_li) {
   }
 
   grid = expand.grid(var1=vars1, var2=vars2,stringsAsFactors = FALSE) %>%
-    mutate(var12 = sort2_chr(var1, var2, "#"))
+    mutate(var12 = sort2_chr(var1, var2, sep="#"))
 
-  dat12_li = lapply(seq_rows(grid), function(i) {
+  dat12_li = lapply(seq_len(nrow(grid)), function(i) {
     if (is_factor1) {
       val1 = fdat[[grid$var1[i]]]
     } else {
@@ -951,7 +1001,11 @@ make_ia2_vars = function(rv, dat, level_li) {
   names(dat12_li) = grid$var12
   dat12 = as_tibble(dat12_li)
 
-  bind_cols(fdat, dat12)
+  if (is.null(rv$add_main_effects) || isTRUE(rv$add_main_effects[1])) {
+    return(bind_cols(fdat, dat12))
+  } else {
+    return(dat12)
+  }
 }
 
 # FILE: regtranslate/regvar_expand.R
@@ -975,23 +1029,27 @@ make_ia3_vars = function(rv, dat, level_li) {
   vars3 = if (is_f3) paste0(rv$cterm[3],"=", level_li[[rv$cterm[3]]]) else rv$cterm[3]
 
   # 2-way grids
-  g12 = expand.grid(v1=vars1, v2=vars2, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
-  g13 = expand.grid(v1=vars1, v2=vars3, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
-  g23 = expand.grid(v1=vars2, v2=vars3, stringsAsFactors=FALSE) %>% mutate(var = sort2_chr(v1, v2, sep="#"))
+  g12 = expand.grid(a=vars1, b=vars2, stringsAsFactors=FALSE) %>% mutate(res = sort2_chr(a, b, sep="#"))
+  g13 = expand.grid(a=vars1, b=vars3, stringsAsFactors=FALSE) %>% mutate(res = sort2_chr(a, b, sep="#"))
+  g23 = expand.grid(a=vars2, b=vars3, stringsAsFactors=FALSE) %>% mutate(res = sort2_chr(a, b, sep="#"))
 
   # 3-way grid
-  g123 = expand.grid(v1=vars1, v2=vars2, v3=vars3, stringsAsFactors=FALSE) %>%
-    mutate(var = split_and_sort(paste0(v1, "#", v2, "#", v3), split="#", k=3L))
+  g123 = expand.grid(a=vars1, b=vars2, c=vars3, stringsAsFactors=FALSE) %>%
+    mutate(res = split_and_sort(paste0(a, "#", b, "#", c), split="#", k=3L))
 
   # Compute values
   get_val = function(is_f, grid_col, i) if (is_f) fdat[[grid_col[i]]] else dat[[grid_col[i]]]
 
-  dat12 = as_tibble(setNames(lapply(seq_rows(g12), function(i) get_val(is_f1, g12$v1, i) * get_val(is_f2, g12$v2, i)), g12$var))
-  dat13 = as_tibble(setNames(lapply(seq_rows(g13), function(i) get_val(is_f1, g13$v1, i) * get_val(is_f3, g13$v2, i)), g13$var))
-  dat23 = as_tibble(setNames(lapply(seq_rows(g23), function(i) get_val(is_f2, g23$v1, i) * get_val(is_f3, g23$v2, i)), g23$var))
-  dat123 = as_tibble(setNames(lapply(seq_rows(g123), function(i) get_val(is_f1, g123$v1, i) * get_val(is_f2, g123$v2, i) * get_val(is_f3, g123$v3, i)), g123$var))
+  dat12 = as_tibble(setNames(lapply(seq_len(nrow(g12)), function(i) get_val(is_f1, g12$a, i) * get_val(is_f2, g12$b, i)), g12$res))
+  dat13 = as_tibble(setNames(lapply(seq_len(nrow(g13)), function(i) get_val(is_f1, g13$a, i) * get_val(is_f3, g13$b, i)), g13$res))
+  dat23 = as_tibble(setNames(lapply(seq_len(nrow(g23)), function(i) get_val(is_f2, g23$a, i) * get_val(is_f3, g23$b, i)), g23$res))
+  dat123 = as_tibble(setNames(lapply(seq_len(nrow(g123)), function(i) get_val(is_f1, g123$a, i) * get_val(is_f2, g123$b, i) * get_val(is_f3, g123$c, i)), g123$res))
 
-  bind_cols(fdat, dat12, dat13, dat23, dat123)
+  if (is.null(rv$add_main_effects) || isTRUE(rv$add_main_effects[1])) {
+    return(bind_cols(fdat, dat12, dat13, dat23, dat123))
+  } else {
+    return(dat123)
+  }
 }
 
 make_factor_level_vars = function(var,dat, levels = level_li[[var]],level_li) {
@@ -1197,6 +1255,424 @@ regdb_parse_se_args = function(se_args, as_df=FALSE) {
   }
   tibble(arg_name=var, arg_val=val)
 }
+
+
+regdb_se_to_sandwich = function(se_category, se_type, se_args,reg_info=NULL) {
+
+  restore.point("regdb_se_to_sandwich")
+
+  se_category = tolower(trimws(as.character(se_category[1])))
+  se_type = tolower(trimws(as.character(se_type[1])))
+
+  if (
+    length(se_args) == 0 ||
+    is.na(se_args[1]) ||
+    !nzchar(se_args[1])
+  ) {
+    se_args = ""
+    args = character(0)
+  } else {
+    se_args = as.character(se_args[1])
+
+    if (stri_detect_fixed(se_args, "=")) {
+      args = repdb_parse_se_args(se_args)
+    } else {
+      args = setNames(se_args, "raw")
+    }
+  }
+
+  get_arg = function(name, default=NA_character_) {
+    if (!name %in% names(args)) {
+      return(default)
+    }
+
+    val = as.character(args[name][1])
+
+    if (is.na(val) || !nzchar(val)) {
+      return(default)
+    }
+
+    val
+  }
+
+  is_true_arg = function(name, default=FALSE) {
+    val = get_arg(name)
+
+    if (is.na(val)) {
+      return(default)
+    }
+
+    tolower(val) %in% c("true", "t", "yes", "y", "1")
+  }
+
+  reg_field = function(name) {
+    if (
+      is.null(reg_info) ||
+      !name %in% names(reg_info) ||
+      length(reg_info[[name]]) == 0
+    ) {
+      return("")
+    }
+
+    val = as.character(reg_info[[name]][1])
+
+    if (is.na(val)) {
+      return("")
+    }
+
+    trimws(val)
+  }
+
+  formula_code = function(vars) {
+    vars = as.character(vars)
+    vars = vars[!is.na(vars) & nzchar(vars)]
+
+    if (length(vars) == 0) {
+      return("")
+    }
+
+    vars = paste0("`", vars, "`")
+
+    paste0(
+      "~ ",
+      stri_flatten(vars, collapse=" + ")
+    )
+  }
+
+  cluster_vars = function() {
+    if (length(args) == 0 || is.null(names(args))) {
+      return(character(0))
+    }
+
+    arg_names = names(args)
+    rows = which(stri_startswith_fixed(arg_names, "cluster"))
+
+    if (length(rows) == 0) {
+      return(character(0))
+    }
+
+    cluster_names = arg_names[rows]
+    cluster_num = suppressWarnings(as.integer(
+      stri_extract_first_regex(cluster_names, "[0-9]+$")
+    ))
+
+    rows = rows[order(cluster_num, na.last=TRUE)]
+    vars = as.character(args[rows])
+
+    vars[!is.na(vars) & nzchar(vars)]
+  }
+
+  unsupported_code = function(msg) {
+    repbox_problem(
+      msg,
+      "sandwich_se_not_implemented",
+      fail_action="msg"
+    )
+
+    paste0(
+      "stop(",
+      encodeString(msg, quote='"'),
+      ")"
+    )
+  }
+
+  finite_sample_factor = function(code) {
+    paste0(
+      "(",
+      code,
+      ") * stats::nobs(reg) / ",
+      "(stats::nobs(reg) - sum(!is.na(stats::coef(reg))))"
+    )
+  }
+
+  small = is_true_arg("small")
+
+  # Conventional, OIM, and other model-based covariance estimators.
+  #
+  # reg is estimated with vcov = "iid" before this expression is evaluated,
+  # so stats::vcov(reg) returns the model-based covariance matrix.
+  if (
+    se_category == "iid" ||
+    se_type %in% c(
+      "iid", "unadjusted", "conventional", "ols", "oim"
+    )
+  ) {
+    return("stats::vcov(reg)")
+  }
+
+  # The OPG covariance is the inverse outer product of the score vectors.
+  if (se_type == "opg") {
+    return(paste0(
+      "sandwich::vcovOPG(reg, adjust = ",
+      if (small) "TRUE" else "FALSE",
+      ")"
+    ))
+  }
+
+  clustervar = cluster_vars()
+  is_cluster = se_category == "cluster" ||
+    se_type %in% c("cluster", "twoway", "multiway")
+
+  # Cluster-robust covariance estimators.
+  if (is_cluster) {
+    if (length(clustervar) == 0) {
+      return(unsupported_code(
+        paste0(
+          "Cannot construct cluster-robust covariance matrix: ",
+          "no clustering variable is stored in se_args."
+        )
+      ))
+    }
+
+    cluster_fml = formula_code(clustervar)
+
+    # sandwich::vcovCL supports HC0-HC3 corrections. HC2 and HC3
+    # with a cluster variable correspond to CR2-style and CR3-style
+    # cluster leverage corrections.
+    if (se_type %in% c("hc0", "hc1", "hc2", "hc3")) {
+      hc_type = toupper(se_type)
+    } else {
+      # HC1 plus cadjust gives the usual observation and cluster
+      # finite-sample corrections used by standard Stata cluster VCEs.
+      hc_type = "HC1"
+    }
+
+    if (se_type %in% c("hc4", "hc5")) {
+      return(unsupported_code(
+        paste0(
+          "sandwich::vcovCL does not implement clustered ",
+          toupper(se_type),
+          " covariance matrices."
+        )
+      ))
+    }
+
+    if (is_true_arg("hansen")) {
+      repbox_problem(
+        paste0(
+          "The Stata Hansen correction for clustered HC3 is not ",
+          "implemented by sandwich::vcovCL. Use the standard HC3 ",
+          "cluster correction."
+        ),
+        "sandwich_hansen_not_implemented",
+        fail_action="msg"
+      )
+    }
+
+    return(paste0(
+      "sandwich::vcovCL(",
+      "reg, ",
+      "cluster = ", cluster_fml, ", ",
+      'type = "', hc_type, '", ',
+      "cadjust = TRUE",
+      ")"
+    ))
+  }
+
+  # Observation-level heteroskedasticity-consistent covariance estimators.
+  if (se_type %in% c(
+    "hc0", "hc1", "hc2", "hc3", "hc4", "hc5"
+  )) {
+    return(paste0(
+      "sandwich::vcovHC(",
+      "reg, ",
+      'type = "', toupper(se_type), '"',
+      ")"
+    ))
+  }
+
+  # A generic robust type does not identify a particular HC correction.
+  # sandwich::sandwich() is the unadjusted empirical score sandwich.
+  if (
+    se_category == "robust" &&
+    se_type %in% c("robust", "")
+  ) {
+    code = "sandwich::sandwich(reg)"
+
+    if (small) {
+      code = finite_sample_factor(code)
+    }
+
+    return(code)
+  }
+
+  # Stata newey uses a Bartlett-kernel Newey-West covariance estimator
+  # without prewhitening. NeweyWest(..., adjust=TRUE) applies the
+  # regression-style n/(n-k) finite-sample correction.
+  if (se_type %in% c("nw", "neweywest", "newey-west")) {
+    lag = get_arg("lag")
+
+    if (is.na(lag) || !stri_detect_regex(lag, "^[0-9]+$")) {
+      return(unsupported_code(
+        paste0(
+          "Cannot construct Newey-West covariance matrix: ",
+          "a nonnegative integer lag is required in se_args."
+        )
+      ))
+    }
+
+    timevar = reg_field("timevar")
+    order_code = ""
+
+    if (nzchar(timevar)) {
+      order_code = paste0(
+        ", order.by = ",
+        formula_code(timevar)
+      )
+    }
+
+    return(paste0(
+      "sandwich::NeweyWest(",
+      "reg, ",
+      "lag = ", lag, ", ",
+      "prewhite = FALSE, ",
+      "adjust = TRUE",
+      order_code,
+      ")"
+    ))
+  }
+
+  # A generic HAC label does not contain enough information to reproduce
+  # a particular Stata kernel and bandwidth. vcovHAC provides a generic
+  # HAC estimator, but a stored raw hacspec is reported as an approximation.
+  if (se_type == "hac") {
+    hacspec = get_arg("hacspec")
+
+    if (!is.na(hacspec)) {
+      repbox_problem(
+        paste0(
+          "The stored HAC specification '", hacspec,
+          "' is not translated exactly. Use sandwich::vcovHAC ",
+          "with its default HAC weighting."
+        ),
+        "sandwich_hac_approximation",
+        fail_action="msg"
+      )
+    }
+
+    timevar = reg_field("timevar")
+    order_code = ""
+
+    if (nzchar(timevar)) {
+      order_code = paste0(
+        ", order.by = ",
+        formula_code(timevar)
+      )
+    }
+
+    return(paste0(
+      "sandwich::vcovHAC(",
+      "reg, ",
+      "prewhite = FALSE, ",
+      "adjust = TRUE",
+      order_code,
+      ")"
+    ))
+  }
+
+  # sandwich::vcovPL with aggregate=TRUE computes Driscoll-Kraay:
+  # score contributions are aggregated by time before applying the
+  # HAC correction, allowing cross-sectional and serial dependence.
+  if (se_type %in% c("dk", "dkraay", "driscoll-kraay")) {
+    panelvar = reg_field("panelvar")
+    timevar = reg_field("timevar")
+
+    if (!nzchar(panelvar) || !nzchar(timevar)) {
+      return(unsupported_code(
+        paste0(
+          "Cannot construct Driscoll-Kraay covariance matrix: ",
+          "panelvar and timevar are required."
+        )
+      ))
+    }
+
+    lag = get_arg("lag")
+    lag_code = ""
+
+    if (!is.na(lag)) {
+      if (stri_detect_regex(lag, "^[0-9]+$")) {
+        lag_code = paste0(", lag = ", lag)
+      } else if (lag %in% c("max", "NW1987", "NW1994")) {
+        lag_code = paste0(
+          ", lag = ",
+          encodeString(lag, quote='"')
+        )
+      } else {
+        return(unsupported_code(
+          paste0(
+            "Unsupported Driscoll-Kraay lag specification: ",
+            lag
+          )
+        ))
+      }
+    }
+
+    return(paste0(
+      "sandwich::vcovPL(",
+      "reg, ",
+      "cluster = ",
+      formula_code(c(panelvar, timevar)),
+      lag_code, ", ",
+      "aggregate = TRUE, ",
+      "adjust = TRUE",
+      ")"
+    ))
+  }
+
+  # Basic case-resampling covariance estimator. Recognized arguments are
+  # reps and cluster1, cluster2, etc. Other Stata bootstrap options are
+  # not reproduced here.
+  if (se_type == "bootstrap") {
+    reps = get_arg("reps")
+    cluster_code = ""
+    reps_code = ""
+
+    if (length(clustervar) > 0) {
+      cluster_code = paste0(
+        ", cluster = ",
+        formula_code(clustervar)
+      )
+    }
+
+    if (!is.na(reps) && stri_detect_regex(reps, "^[0-9]+$")) {
+      reps_code = paste0(", R = ", reps)
+    }
+
+    return(paste0(
+      "sandwich::vcovBS(",
+      "reg",
+      cluster_code,
+      reps_code,
+      ")"
+    ))
+  }
+
+  # The sandwich jackknife drops one observation, or one cluster when a
+  # clustering variable is supplied, and recomputes the estimates.
+  if (se_type == "jackknife") {
+    cluster_code = ""
+
+    if (length(clustervar) > 0) {
+      cluster_code = paste0(
+        ", cluster = ",
+        formula_code(clustervar)
+      )
+    }
+
+    return(paste0(
+      "sandwich::vcovJK(",
+      "reg",
+      cluster_code,
+      ")"
+    ))
+  }
+
+  unsupported_code(paste0(
+    "No sandwich covariance translation is implemented for ",
+    "se_category = '", se_category,
+    "' and se_type = '", se_type, "'."
+  ))
+}
 ```
 # END OF FILE: /home/rstudio/repbox/regtranslate/R/se.R
 
@@ -1209,7 +1685,7 @@ sort2_chr = function(a, b, ..., sep=NULL) {
   swap = stringi::stri_cmp_gt(a, b, ...)
   lo = ifelse(swap, b, a)
   hi = ifelse(swap, a, b)
-  if (!is.null(sep)) return(paste0(a,sep,b))
+  if (!is.null(sep)) return(paste0(lo,sep,hi))
   list(lo = lo, hi = hi)
 }
 
@@ -1277,8 +1753,6 @@ split_and_sort = function(terms, split = "#", ..., k = NULL) {
 ```
 
 # Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
-# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
-# Replace stata_to_r_code_fixest and fixest_vcov_code_from_regdb
 stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
   restore.point("stata_to_r_code_fixest")
 
@@ -1287,7 +1761,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   formula = regvar_to_formula_fixest(regvar, regxvar, cmdpart, reg = reg)
 
-  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args, reg$se_category)
   ssc_expr = fixest_ssc_code_from_reg(reg, vcov_type = vcov_type)
   use_ssc = !is.null(ssc_expr)
 
@@ -1296,7 +1770,7 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 
   if (use_sandwich) {
     reg_vcov = "iid"
-    vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args)
+    vcov = regdb_se_to_sandwich(reg$se_category, reg$se_type, reg$se_args, reg_info=reg)
   } else {
     reg_vcov = fixest_vcov_code_from_regdb(reg$se_type, reg$se_args, vcov_type, quote=FALSE, reg=reg)
     if (use_summary) {
@@ -1328,6 +1802,22 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
   # Pass ssc to fixest natively when relevant.
   if (use_ssc) {
     arg_str = c(arg_str, "ssc = ssc")
+  }
+
+  # Handle singleton observations according to Stata behavior
+  if (isTRUE(opts$match_stata_singletons)) {
+    if (reg$cmd %in% c("areg", "xtreg", "xtivreg", "xtivreg2", "xtpoisson", "xtlogit", "xtprobit", "clogit")) {
+      arg_str = c(arg_str, 'fixef.rm = "none"')
+    } else if (reg$cmd %in% c("reghdfe", "ivreghdfe", "ppmlhdfe")) {
+      # reghdfe/ppmlhdfe drops them by default, but allows keepsingletons option
+      keep_singletons = FALSE
+      if (!is.null(cmdpart)) {
+        keep_singletons = any(cmdpart$part == "opt" & startsWith(tolower(cmdpart$content), "keepsingleton"))
+      }
+      if (keep_singletons) {
+        arg_str = c(arg_str, 'fixef.rm = "none"')
+      }
+    }
   }
 
   library_code = "library(fixest)"
@@ -1405,9 +1895,9 @@ stata_to_r_code_fixest = function(reg, regvar, regxvar, cmdpart, opts=code_optio
 fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_type_from_regdb(se_type,se_args), quote=TRUE, reg=NULL) {
   restore.point("fixest_vcov_code_from_regdb")
 
-  if (vcov_type %in% c("cluster","twoway")) {
+  if (vcov_type %in% c("cluster","twoway", "multiway")) {
     clustervar = extract_clustervar_from_se_args(se_args)
-    # Return as a formula (~ var1 + var2) natively supported by fixest
+    # Return as a formula (~ var1 + var2 + ...) natively supported by fixest
     code = paste0("~ ", paste0("`", clustervar, "`", collapse = " + "))
     return(code)
   }
@@ -1452,14 +1942,200 @@ fixest_vcov_code_from_regdb = function(se_type, se_args, vcov_type=fixest_vcov_t
 
 
 
+fixest_vcov_type_from_regdb = function(se_type, se_args,se_category=NA_character_) {
 
-fixest_vcov_type_from_regdb = function(se_type, se_args) {
-  restore.point("se_type_to_fixest_vcov")
-  if (se_type == "hc1") return("hetero")
-  if (se_type %in%  c("cluster")) return(se_type)
-  if (se_type %in%  c("iid","cluster","twoway", "conley")) return(se_type)
-  if (se_type %in% c("nw", "dk")) return(toupper(se_type))
-  return("sandwich")
+  restore.point("fixest_vcov_type_from_regdb ")
+
+  se_type = tolower(trimws(as.character(se_type[1])))
+  se_category = tolower(trimws(as.character(se_category[1])))
+
+  if (is.na(se_type)) se_type = ""
+  if (is.na(se_category)) se_category = ""
+
+  clustervar = tryCatch(
+    extract_clustervar_from_se_args(se_args),
+    error = function(e) character(0)
+  )
+  clustervar = as.character(clustervar)
+  clustervar = clustervar[!is.na(clustervar) & nzchar(clustervar)]
+
+  num_clustervar = length(clustervar)
+  is_cluster = se_category == "cluster" || num_clustervar > 0
+
+  cluster_vcov_type = function() {
+    if (num_clustervar <= 1) return("cluster")
+    if (num_clustervar == 2) return("twoway")
+    "multiway"
+  }
+
+  # Conventional and model-based VCEs are represented by fixest's
+  # native model-based covariance matrix.
+  if (se_type %in% c(
+    "iid", "unadjusted", "conventional", "ols", "oim"
+  )) {
+    return("iid")
+  }
+
+  # fixest implements HC1 under the names hetero, HC1, and White.
+  # Small-sample corrections are handled separately through ssc.
+  if (se_type %in% c("robust", "hc1")) {
+    return("hetero")
+  }
+
+  # Ordinary one-way and multiway clustering are handled natively.
+  # fixest_vcov_code_from_regdb() converts these routing values into
+  # a formula containing the stored cluster variables.
+  if (se_type %in% c("cluster", "twoway", "multiway")) {
+    return(se_type)
+  }
+
+  # fixest implements these time-series, panel, and spatial VCEs natively.
+  if (se_type %in% c("nw", "neweywest", "newey-west")) {
+    return("NW")
+  }
+
+  if (se_type %in% c(
+    "dk", "dkraay", "driscoll-kraay", "driscoll_kraay"
+  )) {
+    return("DK")
+  }
+
+  if (se_type == "conley") {
+    return("conley")
+  }
+
+  # These explicit nonclustered HC estimators are not native fixest
+  # VCOV types. They can be computed by sandwich::vcovHC().
+  if (se_type %in% c("hc0", "hc2", "hc3", "hc4", "hc5")) {
+    if (!is_cluster) {
+      return("sandwich")
+    }
+
+    # Clustered HC2 and HC3 are CR2/CR3-style leverage-adjusted
+    # cluster VCEs. sandwich::vcovCL documents HC2/HC3 only for lm
+    # and glm objects, so use ordinary fixest clustering as fallback.
+    repbox_problem(
+      paste0(
+        "The clustered ", toupper(se_type),
+        " covariance estimator is not translated exactly. ",
+        "Use ordinary fixest cluster-robust standard errors."
+      ),
+      "fixest_cluster_hc_fallback",
+      "msg"
+    )
+    return(cluster_vcov_type())
+  }
+
+  # OPG and generic HAC explicitly imply covariance estimators that are
+  # not available as native fixest VCOV types. Use the sandwich path.
+  if (se_type %in% c("opg", "hac")) {
+    return("sandwich")
+  }
+
+  # sandwich implements bootstrap and jackknife covariance estimators,
+  # but they need not reproduce Stata's exact resampling design and can
+  # be expensive. By default use the corresponding asymptotic fixest VCE.
+  # opts$prefer_sandwich can still explicitly request the resampling path.
+  if (se_type %in% c("bootstrap", "jackknife")) {
+    if (is_cluster && num_clustervar > 0) {
+      fallback = cluster_vcov_type()
+    } else {
+      fallback = "hetero"
+    }
+
+    repbox_problem(
+      paste0(
+        "Stata ", se_type,
+        " standard errors are not reproduced by default. Use ",
+        fallback,
+        " as an asymptotic fixest fallback."
+      ),
+      "fixest_resampling_vcov_fallback",
+      "msg"
+    )
+    return(fallback)
+  }
+
+  # Survey VCEs generally account for heteroskedasticity and potentially
+  # clustering. Without the complete survey design, use clustering when
+  # cluster variables are stored and heteroskedasticity-robust otherwise.
+  if (se_type == "svy") {
+    if (is_cluster && num_clustervar > 0) {
+      fallback = cluster_vcov_type()
+    } else {
+      fallback = "hetero"
+    }
+
+    repbox_problem(
+      paste0(
+        "The complete Stata survey design is unavailable. Use ",
+        fallback,
+        " as the fixest VCOV fallback."
+      ),
+      "fixest_svy_vcov_fallback",
+      "msg"
+    )
+    return(fallback)
+  }
+
+  # Rubin's multiple-imputation variance cannot be reconstructed from a
+  # single fixest estimation. The model-based VCE is the neutral fallback.
+  if (se_type == "mi") {
+    repbox_problem(
+      paste0(
+        "Multiple-imputation variance combination is not implemented. ",
+        "Use fixest iid standard errors."
+      ),
+      "fixest_mi_vcov_fallback",
+      "msg"
+    )
+    return("iid")
+  }
+
+  # For unknown exact types, retain the broad RepDB category where that
+  # gives a runnable and economically meaningful approximation.
+  if (se_category == "iid") {
+    return("iid")
+  }
+
+  if (se_category == "robust") {
+    repbox_problem(
+      paste0(
+        "Unknown robust standard error type '", se_type,
+        "'. Use fixest heteroskedasticity-robust standard errors."
+      ),
+      "unknown_fixest_robust_vcov",
+      "msg"
+    )
+    return("hetero")
+  }
+
+  if (se_category == "cluster" && num_clustervar > 0) {
+    fallback = cluster_vcov_type()
+
+    repbox_problem(
+      paste0(
+        "Unknown clustered standard error type '", se_type,
+        "'. Use ordinary ", fallback,
+        " cluster-robust standard errors."
+      ),
+      "unknown_fixest_cluster_vcov",
+      "msg"
+    )
+    return(fallback)
+  }
+
+  # No reliable information about the VCE remains. IID is preferable to
+  # invoking an unrelated sandwich estimator merely because it is robust.
+  repbox_problem(
+    paste0(
+      "No fixest VCOV mapping is implemented for standard error type '",
+      se_type, "'. Use iid standard errors."
+    ),
+    "unknown_fixest_vcov",
+    "msg"
+  )
+  return("iid")
 }
 
 # Choose default fixest::ssc() settings for translated Stata commands.
@@ -1471,7 +2147,7 @@ fixest_ssc_code_from_reg = function(reg, vcov_type = fixest_vcov_type_from_regdb
 
   is_ml = reg$cmd %in% c("logit", "xtlogit", "probit", "xtprobit", "dprobit", "poisson", "xtpoisson", "nbreg", "gnbreg", "clogit")
 
-  if (vcov_type %in% c("cluster", "twoway", "DK", "NW")) {
+  if (vcov_type %in% c("cluster", "twoway", "multiway", "DK", "NW")) {
     if (reg$cmd == "areg") {
       return('fixest::ssc(K.adj = TRUE, K.fixef = "full", G.adj = TRUE)')
     }
@@ -1544,7 +2220,7 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart, reg = NULL) {
   # Exogeneous x that are no FE
   rows = which(rxv$role == "exo")
   if (sum(rows)>0) {
-    rhs_terms = c(rhs_terms, paste0("`",rxv$cterm[rows],"`"))
+    rhs_terms = c(rhs_terms, paste0("`",unique(rxv$cterm[rows]),"`"))
   } else {
     if (!omit_constant) {
       rhs_terms = c(rhs_terms, "1")
@@ -1573,17 +2249,17 @@ regvar_to_formula_fixest = function(regvar, regxvar, cmdpart, reg = NULL) {
         }
       ) %>%
       pull(fe_expr)
-    form = paste0(form, " | ", paste0(fe_terms, collapse = " + "))
+    form = paste0(form, " | ", paste0(unique(fe_terms), collapse = " + "))
   }
 
   # Endogeneous x and instruments (never FE)
   rows = which(rxv$role == "endo")
   if (sum(rows)>0) {
-    form = paste0(form, " | ",paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+    form = paste0(form, " | ",paste0("`",unique(rxv$cterm[rows]),"`", collapse= " + "))
   }
   rows = which(rxv$role == "instr")
   if (sum(rows)>0) {
-    form = paste0(form, " ~ ",paste0("`",rxv$cterm[rows],"`", collapse= " + "))
+    form = paste0(form, " ~ ",paste0("`",unique(rxv$cterm[rows]),"`", collapse= " + "))
   }
   form
 }
@@ -1891,6 +2567,183 @@ stata_to_r_code_mfx = function(reg, regvar, regxvar, cmdpart, opts=code_options(
 -----------------------------------------------------------
 
 
+# FILE: /home/rstudio/repbox/regtranslate/R/to_r_plm.R
+```
+stata_to_r_code_plm = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
+  restore.point("stata_to_r_code_plm")
+
+  org_depvars = regvar$cterm[regvar$role=="dep"]
+  mod_depvars = replace_cterm_special_symbols(org_depvars)
+
+  formula = regvar_to_formula_plm(regvar, regxvar, cmdpart, reg = reg)
+
+  command = "plm::plm"
+  arg_str = c(
+    paste0("formula = formula"),
+    paste0("data = dat")
+  )
+
+  rcmd_code = paste0('rcmd = "',command,'"')
+
+  # Prepare data modifications in correct order
+  data_code_parts = character(0)
+
+  if (any(org_depvars != mod_depvars)) {
+    data_code_parts = c(data_code_parts, paste0('dat[["', mod_depvars,'"]] = dat[["', org_depvars,'"]]', collapse="\n"))
+  }
+
+  lw_code = r_listwise_deletion_code(regvar)
+  if (nzchar(lw_code)) data_code_parts = c(data_code_parts, lw_code)
+
+  wt = r_weight_code(reg, template = "dat[['%s']]")
+  if (nzchar(wt$data_code)) data_code_parts = c(data_code_parts, wt$data_code)
+  if (nzchar(wt$weight_arg)) arg_str = c(arg_str, wt$weight_arg)
+
+  # Duplicate index variables for plm so they don't get cast to factors if used as regressors
+  panelvar = reg$panelvar[1]
+  timevar = reg$timevar[1]
+  if (!is.na(panelvar) && nzchar(panelvar)) {
+    data_code_parts = c(data_code_parts, paste0("dat[['.plm.id']] = dat[['", panelvar, "']]"))
+    if (!is.na(timevar) && nzchar(timevar)) {
+      data_code_parts = c(data_code_parts, paste0("dat[['.plm.time']] = dat[['", timevar, "']]"))
+      arg_str = c(arg_str, "index = c('.plm.id', '.plm.time')")
+    } else {
+      arg_str = c(arg_str, "index = '.plm.id'")
+    }
+  }
+
+  # Model type
+  flags = if (!is.null(reg$flags) && !is.na(reg$flags)) strsplit(reg$flags, ",\\s*")[[1]] else character(0)
+  if ("re" %in% flags) {
+    arg_str = c(arg_str, "model = 'random'")
+  } else if ("fe" %in% flags) {
+    arg_str = c(arg_str, "model = 'within'")
+  } else if ("be" %in% flags) {
+    arg_str = c(arg_str, "model = 'between'")
+  } else if ("fd" %in% flags) {
+    arg_str = c(arg_str, "model = 'fd'")
+  }
+
+  # Rename columns to avoid plm choking on `#` and `=`
+  data_code_parts = c(data_code_parts, "dat = regtranslate::cterm_to_saveterm_cols(dat)")
+
+  data_code = paste0(data_code_parts, collapse = "\n")
+
+  formula_code = paste0('formula = ', formula)
+  reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
+
+  library_code = "# Don't call library(plm), would overload dplyr::lag"
+
+  code_df = tibble(part = c("library", "rcmd","data","formula", "reg"), code = c(library_code, rcmd_code,data_code, formula_code, reg_code))
+
+  use_summary = TRUE
+  sum_code = "sum = summary(reg)"
+
+  # Handle VCOV for robust/cluster
+  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
+  if (vcov_type %in% c("cluster", "twoway", "multiway")) {
+    clustervar = extract_clustervar_from_se_args(reg$se_args)
+    if (length(clustervar) > 0) {
+      if (clustervar[1] == panelvar) {
+        # plm default for cluster="group" is robust to panel correlation
+        sum_code = "sum = lmtest::coeftest(reg, vcov = plm::vcovHC(reg, type = 'HC1', cluster = 'group'))"
+        #library_code = paste0(library_code, "\nlibrary(lmtest)")
+        code_df$code[1] = library_code
+      } else {
+        # Fallback to vcovHC for group if it's single cluster
+        sum_code = paste0("sum = lmtest::coeftest(reg, vcov = plm::vcovHC(reg, type = 'HC1', cluster = 'group'))")
+        #library_code = paste0(library_code, "\nlibrary(lmtest)")
+        code_df$code[1] = library_code
+      }
+    }
+  } else if (vcov_type == "hetero") {
+     sum_code = "sum = lmtest::coeftest(reg, vcov = plm::vcovHC(reg, type = 'HC1', cluster = 'time'))"
+     #library_code = paste0(library_code, "\nlibrary(lmtest)")
+     code_df$code[1] = library_code
+  }
+
+  code_df = bind_rows(
+    code_df,
+    tibble(part = c("sum"), code = c(sum_code))
+  )
+
+  if (opts$add_broom) {
+    code_df = add_reg_broom_code(code_df, use_summary=use_summary, use_conf_int=TRUE)
+
+    # broom::glance doesn't work well on coeftest. If sum is coeftest, we run glance on reg instead.
+    glance_idx = which(code_df$part == "glance")
+    if (length(glance_idx) > 0) {
+      code_df$code[glance_idx] = "glance = broom::glance(reg)"
+    }
+
+    # Restore original cterms for broom::tidy output
+    code_df = bind_rows(
+      code_df,
+      tibble(part = "ct_fix", code = "ct$term = regtranslate::saveterm_to_cterm(ct$term)")
+    )
+  }
+  if (opts$add_function) {
+    code_df = add_reg_function_code(code_df)
+  }
+  code_df
+}
+
+regvar_to_formula_plm = function(regvar, regxvar, cmdpart, reg = NULL) {
+  restore.point("regvar_to_formula_plm")
+
+  rv = regvar %>% filter(role == "dep" | absorbed_fe)
+  rxv = regxvar %>% filter(role !="exo" | in_regcoef | startsWith(cterm,"_I"))
+
+  depvars = rv$cterm[rv$role=="dep"]
+  depvars = cterm_to_saveterm(depvars)
+  form = paste0(paste0("`",depvars,"`", collapse=" + "), " ~ ")
+
+  omit_constant = FALSE
+  if (!is.null(reg) && "flags" %in% names(reg)) {
+    omit_constant = stringi::stri_detect_fixed(reg$flags, "noconst")
+  } else if (!is.null(cmdpart)) {
+    omit_constant = any(cmdpart$part=="opt" & startsWith(tolower(cmdpart$content), "nocon"))
+  }
+
+  rhs_terms = character()
+  if (omit_constant) {
+    rhs_terms = c(rhs_terms, "0")
+  }
+
+  rows = which(rxv$role == "exo")
+  if (sum(rows)>0) {
+    rhs_terms = c(rhs_terms, paste0("`", cterm_to_saveterm(unique(rxv$cterm[rows])), "`"))
+  } else {
+    if (!omit_constant) {
+      rhs_terms = c(rhs_terms, "1")
+    }
+  }
+
+  endo_rows = which(rxv$role == "endo")
+  if (sum(endo_rows)>0) {
+    rhs_terms = c(rhs_terms, paste0("`", cterm_to_saveterm(unique(rxv$cterm[endo_rows])), "`"))
+  }
+
+  form = paste0(form, paste0(rhs_terms, collapse= " + "))
+
+  # IVs
+  instr_rows = which(rxv$role == "instr")
+  if (sum(instr_rows)>0) {
+    iv_terms = character()
+    if (omit_constant) iv_terms = c(iv_terms, "0")
+    if (sum(rows)>0) iv_terms = c(iv_terms, paste0("`", cterm_to_saveterm(unique(rxv$cterm[rows])), "`"))
+    iv_terms = c(iv_terms, paste0("`", cterm_to_saveterm(unique(rxv$cterm[instr_rows])), "`"))
+    form = paste0(form, " | ", paste0(iv_terms, collapse= " + "))
+  }
+
+  form
+}
+```
+# END OF FILE: /home/rstudio/repbox/regtranslate/R/to_r_plm.R
+
+-----------------------------------------------------------
+
+
 # FILE: /home/rstudio/repbox/regtranslate/R/to_r_quantreg.R
 ```
 
@@ -1989,14 +2842,22 @@ example = function() {
 }
 
 
-code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE, drop_perfect_predictors=TRUE) {
-  list(prefer_sandwich=prefer_sandwich, prefer_summary=prefer_summary, add_broom=add_broom, add_function=add_function, add_restorepoint=add_restorepoint, drop_perfect_predictors=drop_perfect_predictors)
+code_options = function(prefer_sandwich=FALSE, prefer_summary=FALSE, add_broom=TRUE, add_function=FALSE, add_restorepoint=FALSE, drop_perfect_predictors=TRUE, match_stata_singletons=TRUE) {
+  list(
+    prefer_sandwich = prefer_sandwich,
+    prefer_summary = prefer_summary,
+    add_broom = add_broom,
+    add_function = add_function,
+    add_restorepoint = add_restorepoint,
+    drop_perfect_predictors = drop_perfect_predictors,
+    match_stata_singletons = match_stata_singletons
+  )
 }
 
 reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
   restore.point("reg_stata_to_r_code")
 
-  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer)
+  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer, reg = reg)
   if (isTRUE(r_cmd == "no_trans") | is.na(r_cmd)) {
     cat(paste0("The Stata command ", reg$cmd, " is not yet implemented for translation in regtranslate."))
     return(NULL)
@@ -2025,7 +2886,7 @@ reg_stata_to_r_code = function(reg, regvar, regxvar, cmdpart, prefer="fixest", o
 reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest", opts=code_options()) {
   restore.point("reg_stata_to_r_formula")
 
-  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer)
+  r_cmd = get_stata_to_r_cmd(reg$cmd, prefer, reg = reg)
   if (isTRUE(r_cmd == "no_trans")) {
     return(NULL)
   } else if (is.na(r_cmd)) {
@@ -2038,12 +2899,21 @@ reg_stata_to_r_formula = function(reg, regvar, regxvar, cmdpart, prefer="fixest"
   as.formula(res)
 }
 
-get_stata_to_r_cmd = function(cmd, prefer = NULL) {
+get_stata_to_r_cmd = function(cmd, prefer = NULL, reg = NULL) {
   restore.point("get_stata_to_r_cmd")
   df = stata_to_r_cmds_df()
   rows = df$stata_cmd == cmd
   if (length(rows)==0) return(NA)
   r_cmds = df$r_cmd[rows]
+
+  if (!is.null(reg) && cmd %in% c("xtreg", "xtivreg")) {
+    flags = if (!is.null(reg$flags) && !is.na(reg$flags)) strsplit(reg$flags, ",\\s*")[[1]] else character(0)
+    if ("re" %in% flags || "be" %in% flags || "mle" %in% flags || "pa" %in% flags || "fd" %in% flags) {
+      if ("plm" %in% r_cmds) return("plm")
+      return("plm")
+    }
+  }
+
   if (length(rows)==1 | length(prefer)==0) return(r_cmds[1])
   ma = match(r_cmds, prefer)
   best = which.min(ma)
@@ -2055,7 +2925,8 @@ get_stata_to_r_cmd = function(cmd, prefer = NULL) {
 stata_to_r_cmds_df = function(cmd) {
   li = list(
     # If you add commands here make to sure that you update the to_r_fixest.R code
-    fixest.. = c("regress","reg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey", "nbreg", "gnbreg", "poisson", "xtpoisson", "clogit"),
+    fixest.. = c("regress","reg", "cgmreg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey", "nbreg", "gnbreg", "poisson", "xtpoisson", "clogit"),
+    plm.. = c("xtreg", "xtivreg"),
     lm.. = c("regress","reg", "newey"),
     ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
     quantreg.. = c("qreg"),
@@ -2163,10 +3034,11 @@ r_listwise_deletion_code = function(regvar) {
 
   paste0(
     "cc_cols = c(", paste0('"', all_base_cterms, '"', collapse=", "), ")\n",
-    "cc_cols = intersect(cc_cols, colnames(dat))\n",
-    "dat = dat[complete.cases(dat[, cc_cols, drop=FALSE]), ]"
+    "dat = stata_drop_missing(dat, cc_cols)"
   )
 }
+
+
 
 #' Generate R code to convert Date/Datetime variables to numeric
 #'
@@ -2330,8 +3202,8 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
   } else if (reg$se_category == "cluster") {
     clustervar = extract_clustervar_from_se_args(reg$se_args)
     arg_str = paste0('cluster = "', clustervar[1],'"')
-    if (reg$se_type == "twoway") {
-      stop("Two way clusters not yet implemented for tobit in R")
+    if (reg$se_type %in% c("twoway", "multiway")) {
+      stop("Multiway clusters not yet implemented for tobit in R")
     }
   }
   arg_str = c(
@@ -2422,3 +3294,218 @@ r_weight_code = function(reg, template = "~ %s") {
 
 -----------------------------------------------------------
 
+
+
+# Format of proposed changes to code  files
+
+When you suggest changes to code or text files or completely new files, you MUST use the following format for each modification. Each change must be enclosed in a `!MODIFICATION` block.
+
+## Overall Structure
+
+Each modification block has three parts:
+1.  Start and end markers: `!MODIFICATION {{what}}` and `!END_MODIFICATION {{what}}`, where {{what}} is just a short reference to what is modified, file name or function name with with file. It will not be parsed but makes it easier for a human to understand blocks.
+2.  A metadata block in **TOML format**. This block ends with a `---` separator line.
+3.  A code payload block, which is a standard markdown code fence.
+
+```
+!MODIFICATION {{what}}
+# TOML metadata goes here
+# ...
+---
+```language
+# New code payload goes here
+```
+!END_MODIFICATION {{what}}
+```
+
+We have two possible scopes for modification:
+  - file (replaces complete file) or
+  - function (replaces an R function).
+
+### **Scope 1: `file`**
+
+Use this format to create a new file or to completely rewrite an existing one.
+
+**Required Fields:**
+*   `scope = "file"`
+*   `file` (string): The path to the file. Very important: state the path of the file as shown in the files header above. If there is a complete absolute path, also show the complete absolute path here.
+*   `description` (string): A brief explanation of the change in quotes ""
+
+### **Example 1.1: Creating or modifying a file**
+!MODIFICATION new_helpers.R
+scope = "file"
+file = "/home/rstudio/myproject/R/new_helpers.R"
+description = "Create a new file for helper functions."
+---
+```r
+# A new helper function
+say_hello = function(name) {
+  paste0("Hello, ", name)
+}
+```
+!END_MODIFICATION new_helpers.R
+
+
+## **Scope 2: `function`**
+
+Use this fomrat to replace an existing function or to insert a new function. The new code payload should contain the complete function, including any preceding comments.
+
+### **Fields for replacing an existing function:**
+*   `scope = "function"`
+*   `file` (string): The path to the file. Very important: state the path of the file as shown in the files header above. If there is a complete absolute path, also show the complete absolute path here.
+*   `function_name` (string): The name of the function to be replaced.
+*   `description` (string): A brief explanation of the change in quotes.
+
+### **Fields for inserting a new function:**
+*   `scope = "function"`
+*   `file` (string): The path to the file. Very important: state the path of the file as shown in the files header above. If there is a complete absolute path, also show the complete absolute path here.
+*   `description` (string): A brief explanation of the change, enclose in quotes.
+*   **One of** the following fields to specify the insertion point. They are mutually exclusive.
+    *   `insert_top = true`: Insert at the top of the file.
+    *   `insert_bottom = true`: Insert at the bottom of the file.
+    *   `insert_before_fun = "function_name"`: Insert before the specified function.
+    *   `insert_after_fun = "function_name"`: Insert after the specified function.
+
+
+### **Example 2.1: Replacing an existing function**
+!MODIFICATION calculate_sum utils.R
+scope = "function"
+file = "R/utils.R"
+function_name = "calculate_sum"
+description = "Update `calculate_sum` to handle NA values correctly.""
+---
+```r
+#' Calculate the sum of a vector, ignoring NAs
+calculate_sum = function(vec) {
+  sum(vec, na.rm = TRUE)
+}
+```
+!END_MODIFICATION calculate_sum utils.R
+
+### **Example 2.2: Inserting a new function at the bottom of a file (here was an absolute file path given)**
+!MODIFICATION is_positive in R/utils.R
+scope = "function"
+file = "/home/myuser/mypkg/R/utils.R"
+insert_bottom = true
+description = "Add a new helper function to check for positivity."
+---
+```r
+
+#' Check if a number is positive
+is_positive = function(n) {
+  n > 0
+}
+```
+!END_MODIFICATION is_positive in R/utils.R
+
+### **Example 2.3: Inserting a new function after a specific function**
+!MODIFICATION is_negative in R/utils.R
+scope = "function"
+file = "R/utils.R"
+insert_after_fun = "is_positive"
+description = "Add a new helper function `is_negative` after `is_positive`."
+---
+```r
+
+#' Check if a number is negative
+is_negative = function(n) {
+  n < 0
+}
+```
+
+Important if the file is shown with absolute path in the file contents above also
+use the absolute path in the file = argument in your modification header.
+
+
+
+##################################
+# Your Task
+##################################
+
+Here we have a failure in an example:
+
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> 
+> repboxRun::repbox_load_libs()
+> project_dir = "/home/rstudio/repbox/projects/aer_100_3_11"
+> # runid = 167
+> # Stata: replace male_beauty = 0 if male_beauty==.
+> data = drf_load_data(project_dir, "cached_dta/167_cache.dta")
+> data$stata2r_original_order_idx = seq_len(nrow(data))
+> assign("has_original_order_idx", TRUE, envir = stata2r::stata2r_env)
+> 
+> # runid = 168
+> # Stata: xtreg donation small_gift large_gift warm_vcm warm_small warm_large under30 elderly, i(id) mle
+> pid = 168
+> if (!exists("parcels")) parcels = list()
+> parcels = repboxDB::repdb_load_parcels(project_dir, c("reg", "regvar", "regxvar"), parcels = parcels)
+> drf = repboxDRF::drf_load(project_dir, parcels = parcels)
+> reg = parcels$reg[parcels$reg$runid == pid, , drop = FALSE]
+> regvar = parcels$regvar[parcels$regvar$runid == pid, , drop = FALSE]
+> regxvar = if (!is.null(parcels$regxvar)) parcels$regxvar[parcels$regxvar$runid == pid, , drop = FALSE] else tibble::tibble()
+> 
+> # dat is the regression-ready data, including the DRF path, filtering,
+> # generated cterm columns, and regxvar columns
+> dat = metaregBase:::mrb_get_regression_data(runid = pid, drf = drf, reg = reg, regvar = regvar, regxvar = regxvar, parcels = parcels)
+> 
+> # Don't call library(plm), would overload dplyr::lag
+> rcmd = "plm::plm"
+> cc_cols = c("small_gift", "large_gift", "warm_vcm", "warm_small", "warm_large", "under30", "elderly", "donation")
+> dat = stata_drop_missing(dat, cc_cols)
+> dat[['.plm.id']] = dat[['id']]
+> dat = regtranslate::cterm_to_saveterm_cols(dat)
+> formula = `donation` ~ `small_gift` + `large_gift` + `warm_vcm` + `warm_small` + `warm_large` + `under30` + `elderly`
+> reg = plm::plm(formula = formula,data = dat,index = '.plm.id')
+> sum = summary(reg)
+> ct = broom::tidy(sum,conf.int=TRUE)
+Error: No tidy method for objects of class summary.plm
+> # This works
+> ct = broom::tidy(reg,conf.int=TRUE)
+> ct
+# A tibble: 7 × 7
+  term     estimate std.error statistic p.value conf.low
+  <chr>       <dbl>     <dbl>     <dbl>   <dbl>    <dbl>
+1 small_g…   0.0396     0.655    0.0604 0.952     -1.24 
+2 large_g…   2.07       0.678    3.05   0.00236    0.738
+3 warm_vcm   3.07       1.13     2.73   0.00649    0.865
+4 warm_sm…   0.323      0.955    0.338  0.735     -1.55 
+5 warm_la…   0.886      1.00     0.883  0.377     -1.08 
+6 under30   -1.50       0.693   -2.16   0.0309    -2.86 
+7 elderly   -0.977      0.517   -1.89   0.0591    -1.99 
+# ℹ 1 more variable: conf.high <dbl>
+> glance = broom::glance(reg)
+> ct$term = regtranslate::saveterm_to_cterm(ct$term)
+
+
+The automatically generated code is
+
+> ct = broom::tidy(sum,conf.int=TRUE)
+Error: No tidy method for objects of class summary.plm
+
+but here it should be 
+
+> ct = broom::tidy(reg,conf.int=TRUE)
+
+I just don't know why for plm the summary was computed and
+
+> ct = broom::tidy(sum,conf.int=TRUE)
+
+Called, are there possibly instances were we need the summary?
+
+If you don't know the reason or there are such cases, maybe for the plm translation try first to call broom::tidy on reg and only if there is an error try it on the summary. But only for plm translations, not generally...

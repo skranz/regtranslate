@@ -65,7 +65,6 @@ stata_to_r_code_plm = function(reg, regvar, regxvar, cmdpart, opts=code_options(
 
   code_df = tibble(part = c("library", "rcmd","data","formula", "reg"), code = c(library_code, rcmd_code,data_code, formula_code, reg_code))
 
-  use_summary = TRUE
   sum_code = "sum = summary(reg)"
 
   # Handle VCOV for robust/cluster
@@ -97,7 +96,8 @@ stata_to_r_code_plm = function(reg, regvar, regxvar, cmdpart, opts=code_options(
   )
 
   if (opts$add_broom) {
-    code_df = add_reg_broom_code(code_df, use_summary=use_summary, use_conf_int=TRUE)
+    use_summary_for_tidy = grepl("coeftest", sum_code)
+    code_df = add_reg_broom_code(code_df, use_summary=use_summary_for_tidy, use_conf_int=TRUE)
 
     # broom::glance doesn't work well on coeftest. If sum is coeftest, we run glance on reg instead.
     glance_idx = which(code_df$part == "glance")
