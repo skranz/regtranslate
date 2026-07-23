@@ -1,6 +1,6 @@
 
 stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
-  restore.point("stata_to_r_code_mfx")
+  restore.point("stata_to_r_code_tobit")
 
   # Ignore dropped regvars (if they are nor part of an interaction)
   #regvar = filter(regvar, !is_dropped | ia_cterm != cterm)
@@ -18,14 +18,47 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
 
   arg_str = NULL
   if (reg$se_category == "robust") {
-    arg_str = "robust = true"
+    arg_str = c(arg_str, "robust = TRUE")
   } else if (reg$se_category == "cluster") {
     clustervar = extract_clustervar_from_se_args(reg$se_args)
-    arg_str = paste0('cluster = "', clustervar[1],'"')
+    if (length(clustervar) > 0) {
+      arg_str = c(arg_str, paste0('cluster = dat[["', clustervar[1],'"]]'))
+    }
     if (reg$se_type %in% c("twoway", "multiway")) {
       stop("Multiway clusters not yet implemented for tobit in R")
     }
   }
+
+  if (!is.null(cmdpart)) {
+    opts_df = cmdpart_to_opts_df(cmdpart)
+
+    # Left censoring
+    ll_row = which(opts_df$opt == "ll")
+    if (length(ll_row) > 0) {
+      val = opts_df$opt_arg[ll_row[1]]
+      if (!is.na(val) && nzchar(val)) {
+        arg_str = c(arg_str, paste0("left = ", val))
+      } else {
+        arg_str = c(arg_str, "left = 0")
+      }
+    } else {
+      arg_str = c(arg_str, "left = -Inf")
+    }
+
+    # Right censoring
+    ul_row = which(opts_df$opt == "ul")
+    if (length(ul_row) > 0) {
+      val = opts_df$opt_arg[ul_row[1]]
+      if (!is.na(val) && nzchar(val)) {
+        arg_str = c(arg_str, paste0("right = ", val))
+      } else {
+        arg_str = c(arg_str, "right = 0")
+      }
+    }
+  } else {
+    arg_str = c(arg_str, "left = -Inf")
+  }
+
   arg_str = c(
     paste0("formula = formula"),
     paste0('data = dat'),

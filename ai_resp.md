@@ -1,135 +1,33 @@
-To resolve the issue where `broom::tidy()` fails on a `summary.plm` object, we can modify the code generation in `stata_to_r_code_plm` for the `plm` package.
+Yes, the Stata command `newey` is already supported! It translates to R's `feols` using the `fixest` package (or `lm` if preferred). 
 
-The issue occurs because certain versions of `broom` have a `tidy()` method for `plm` objects but not for `summary.plm` objects. However, when you use clustered or robust standard errors, the translation constructs a `lmtest::coeftest()` object and assigns it to `sum`. A `coeftest` object *does* have a `tidy()` method, and we *must* call `tidy(sum)` on it to get the adjusted standard errors. 
+We can easily add support for `newey2` by including it in the translation mapping function `stata_to_r_cmds_df`. Since `newey2` functions similarly to `newey` and `reg` in terms of formula construction and estimation, adding it to the list will automatically route it to `feols` with Newey-West standard errors.
 
-We can solve this dynamically during code generation: if the `sum` assignment is just a plain `summary(reg)`, we instruct `add_reg_broom_code` to call `broom::tidy(reg)`. If it uses `coeftest`, we let it call `broom::tidy(sum)`.
+Here is the modification to add `newey2` support:
 
-Here is the updated function:
-
-!MODIFICATION stata_to_r_code_plm
+!MODIFICATION stata_to_r_cmds_df to_r.R
 scope = "function"
-file = "/home/rstudio/repbox/regtranslate/R/to_r_plm.R"
-function_name = "stata_to_r_code_plm"
-description = "Use broom::tidy on reg instead of sum if sum is just summary(reg), avoiding errors for summary.plm."
+file = "/home/rstudio/repbox/regtranslate/R/to_r.R"
+function_name = "stata_to_r_cmds_df"
+description = "Add support for the newey2 command alongside newey."
 ---
 ```r
-stata_to_r_code_plm = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
-  restore.point("stata_to_r_code_plm")
-
-  org_depvars = regvar$cterm[regvar$role=="dep"]
-  mod_depvars = replace_cterm_special_symbols(org_depvars)
-
-  formula = regvar_to_formula_plm(regvar, regxvar, cmdpart, reg = reg)
-
-  command = "plm::plm"
-  arg_str = c(
-    paste0("formula = formula"),
-    paste0("data = dat")
+stata_to_r_cmds_df = function(cmd) {
+  li = list(
+    # If you add commands here make to sure that you update the to_r_fixest.R code
+    fixest.. = c("regress","reg", "cgmreg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey", "newey2", "nbreg", "gnbreg", "poisson", "xtpoisson", "clogit"),
+    plm.. = c("xtreg", "xtivreg"),
+    lm.. = c("regress","reg", "newey", "newey2"),
+    ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
+    quantreg.. = c("qreg"),
+    # Note that parmest does return coefficients not marginal
+    # effects for dprobit. So we don't use mfx
+    #mfx... = c("dprobit"),
+    tobit.. = c("tobit"),
+    stcox.. = c("stcox")
   )
-
-  rcmd_code = paste0('rcmd = "',command,'"')
-
-  # Prepare data modifications in correct order
-  data_code_parts = character(0)
-
-  if (any(org_depvars != mod_depvars)) {
-    data_code_parts = c(data_code_parts, paste0('dat[["', mod_depvars,'"]] = dat[["', org_depvars,'"]]', collapse="\n"))
-  }
-
-  lw_code = r_listwise_deletion_code(regvar)
-  if (nzchar(lw_code)) data_code_parts = c(data_code_parts, lw_code)
-
-  wt = r_weight_code(reg, template = "dat[['%s']]")
-  if (nzchar(wt$data_code)) data_code_parts = c(data_code_parts, wt$data_code)
-  if (nzchar(wt$weight_arg)) arg_str = c(arg_str, wt$weight_arg)
-
-  # Duplicate index variables for plm so they don't get cast to factors if used as regressors
-  panelvar = reg$panelvar[1]
-  timevar = reg$timevar[1]
-  if (!is.na(panelvar) && nzchar(panelvar)) {
-    data_code_parts = c(data_code_parts, paste0("dat[['.plm.id']] = dat[['", panelvar, "']]"))
-    if (!is.na(timevar) && nzchar(timevar)) {
-      data_code_parts = c(data_code_parts, paste0("dat[['.plm.time']] = dat[['", timevar, "']]"))
-      arg_str = c(arg_str, "index = c('.plm.id', '.plm.time')")
-    } else {
-      arg_str = c(arg_str, "index = '.plm.id'")
-    }
-  }
-
-  # Model type
-  flags = if (!is.null(reg$flags) && !is.na(reg$flags)) strsplit(reg$flags, ",\\s*")[[1]] else character(0)
-  if ("re" %in% flags) {
-    arg_str = c(arg_str, "model = 'random'")
-  } else if ("fe" %in% flags) {
-    arg_str = c(arg_str, "model = 'within'")
-  } else if ("be" %in% flags) {
-    arg_str = c(arg_str, "model = 'between'")
-  } else if ("fd" %in% flags) {
-    arg_str = c(arg_str, "model = 'fd'")
-  }
-
-  # Rename columns to avoid plm choking on `#` and `=`
-  data_code_parts = c(data_code_parts, "dat = regtranslate::cterm_to_saveterm_cols(dat)")
-
-  data_code = paste0(data_code_parts, collapse = "\n")
-
-  formula_code = paste0('formula = ', formula)
-  reg_code = paste0('reg = ', command, "(", paste0(arg_str, collapse=","),")")
-
-  library_code = "# Don't call library(plm), would overload dplyr::lag"
-
-  code_df = tibble(part = c("library", "rcmd","data","formula", "reg"), code = c(library_code, rcmd_code,data_code, formula_code, reg_code))
-
-  sum_code = "sum = summary(reg)"
-
-  # Handle VCOV for robust/cluster
-  vcov_type = fixest_vcov_type_from_regdb(reg$se_type, reg$se_args)
-  if (vcov_type %in% c("cluster", "twoway", "multiway")) {
-    clustervar = extract_clustervar_from_se_args(reg$se_args)
-    if (length(clustervar) > 0) {
-      if (clustervar[1] == panelvar) {
-        # plm default for cluster="group" is robust to panel correlation
-        sum_code = "sum = lmtest::coeftest(reg, vcov = plm::vcovHC(reg, type = 'HC1', cluster = 'group'))"
-        #library_code = paste0(library_code, "\nlibrary(lmtest)")
-        code_df$code[1] = library_code
-      } else {
-        # Fallback to vcovHC for group if it's single cluster
-        sum_code = paste0("sum = lmtest::coeftest(reg, vcov = plm::vcovHC(reg, type = 'HC1', cluster = 'group'))")
-        #library_code = paste0(library_code, "\nlibrary(lmtest)")
-        code_df$code[1] = library_code
-      }
-    }
-  } else if (vcov_type == "hetero") {
-     sum_code = "sum = lmtest::coeftest(reg, vcov = plm::vcovHC(reg, type = 'HC1', cluster = 'time'))"
-     #library_code = paste0(library_code, "\nlibrary(lmtest)")
-     code_df$code[1] = library_code
-  }
-
-  code_df = bind_rows(
-    code_df,
-    tibble(part = c("sum"), code = c(sum_code))
-  )
-
-  if (opts$add_broom) {
-    use_summary_for_tidy = grepl("coeftest", sum_code)
-    code_df = add_reg_broom_code(code_df, use_summary=use_summary_for_tidy, use_conf_int=TRUE)
-
-    # broom::glance doesn't work well on coeftest. If sum is coeftest, we run glance on reg instead.
-    glance_idx = which(code_df$part == "glance")
-    if (length(glance_idx) > 0) {
-      code_df$code[glance_idx] = "glance = broom::glance(reg)"
-    }
-
-    # Restore original cterms for broom::tidy output
-    code_df = bind_rows(
-      code_df,
-      tibble(part = "ct_fix", code = "ct$term = regtranslate::saveterm_to_cterm(ct$term)")
-    )
-  }
-  if (opts$add_function) {
-    code_df = add_reg_function_code(code_df)
-  }
-  code_df
+  stata_cmd = unlist(li)
+  r_cmd = str.left.of(names(stata_cmd),"..")
+  data.frame(stata_cmd=stata_cmd,r_cmd=r_cmd,row.names = NULL)
 }
 ```
-!END_MODIFICATION stata_to_r_code_plm
+!END_MODIFICATION stata_to_r_cmds_df to_r.R

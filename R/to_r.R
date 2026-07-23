@@ -100,7 +100,7 @@ stata_to_r_cmds_df = function(cmd) {
     # If you add commands here make to sure that you update the to_r_fixest.R code
     fixest.. = c("regress","reg", "cgmreg", "ivregress","ivreg","ivreg2","xtivreg", "xtivreg2", "reghdfe","ivreghdfe", "xtreg","areg","ppmlhdfe","logit","xtlogit","probit","xtprobit","dprobit", "newey", "nbreg", "gnbreg", "poisson", "xtpoisson", "clogit"),
     plm.. = c("xtreg", "xtivreg"),
-    lm.. = c("regress","reg", "newey"),
+    lm.. = c("regress","reg", "newey", "newey2"),
     ivreg.. = c("ivregress","ivreg","ivreg2", "xtivreg", "xtivreg2"),
     quantreg.. = c("qreg"),
     # Note that parmest does return coefficients not marginal

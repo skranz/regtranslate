@@ -2636,7 +2636,6 @@ stata_to_r_code_plm = function(reg, regvar, regxvar, cmdpart, opts=code_options(
 
   code_df = tibble(part = c("library", "rcmd","data","formula", "reg"), code = c(library_code, rcmd_code,data_code, formula_code, reg_code))
 
-  use_summary = TRUE
   sum_code = "sum = summary(reg)"
 
   # Handle VCOV for robust/cluster
@@ -2668,7 +2667,8 @@ stata_to_r_code_plm = function(reg, regvar, regxvar, cmdpart, opts=code_options(
   )
 
   if (opts$add_broom) {
-    code_df = add_reg_broom_code(code_df, use_summary=use_summary, use_conf_int=TRUE)
+    use_summary_for_tidy = grepl("coeftest", sum_code)
+    code_df = add_reg_broom_code(code_df, use_summary=use_summary_for_tidy, use_conf_int=TRUE)
 
     # broom::glance doesn't work well on coeftest. If sum is coeftest, we run glance on reg instead.
     glance_idx = which(code_df$part == "glance")
@@ -3180,7 +3180,7 @@ stata_to_r_code_stcox = function(reg, regvar, regxvar, cmdpart, opts=code_option
 ```
 
 stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_options(), parts = list()) {
-  restore.point("stata_to_r_code_mfx")
+  restore.point("stata_to_r_code_tobit")
 
   # Ignore dropped regvars (if they are nor part of an interaction)
   #regvar = filter(regvar, !is_dropped | ia_cterm != cterm)
@@ -3198,14 +3198,47 @@ stata_to_r_code_tobit = function(reg, regvar, regxvar, cmdpart, opts=code_option
 
   arg_str = NULL
   if (reg$se_category == "robust") {
-    arg_str = "robust = true"
+    arg_str = c(arg_str, "robust = TRUE")
   } else if (reg$se_category == "cluster") {
     clustervar = extract_clustervar_from_se_args(reg$se_args)
-    arg_str = paste0('cluster = "', clustervar[1],'"')
+    if (length(clustervar) > 0) {
+      arg_str = c(arg_str, paste0('cluster = dat[["', clustervar[1],'"]]'))
+    }
     if (reg$se_type %in% c("twoway", "multiway")) {
       stop("Multiway clusters not yet implemented for tobit in R")
     }
   }
+
+  if (!is.null(cmdpart)) {
+    opts_df = cmdpart_to_opts_df(cmdpart)
+
+    # Left censoring
+    ll_row = which(opts_df$opt == "ll")
+    if (length(ll_row) > 0) {
+      val = opts_df$opt_arg[ll_row[1]]
+      if (!is.na(val) && nzchar(val)) {
+        arg_str = c(arg_str, paste0("left = ", val))
+      } else {
+        arg_str = c(arg_str, "left = 0")
+      }
+    } else {
+      arg_str = c(arg_str, "left = -Inf")
+    }
+
+    # Right censoring
+    ul_row = which(opts_df$opt == "ul")
+    if (length(ul_row) > 0) {
+      val = opts_df$opt_arg[ul_row[1]]
+      if (!is.na(val) && nzchar(val)) {
+        arg_str = c(arg_str, paste0("right = ", val))
+      } else {
+        arg_str = c(arg_str, "right = 0")
+      }
+    }
+  } else {
+    arg_str = c(arg_str, "left = -Inf")
+  }
+
   arg_str = c(
     paste0("formula = formula"),
     paste0('data = dat'),
@@ -3422,90 +3455,5 @@ use the absolute path in the file = argument in your modification header.
 # Your Task
 ##################################
 
-Here we have a failure in an example:
+Do we already have support for the Stata command newewy? Can we also add support for newey2
 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> 
-> repboxRun::repbox_load_libs()
-> project_dir = "/home/rstudio/repbox/projects/aer_100_3_11"
-> # runid = 167
-> # Stata: replace male_beauty = 0 if male_beauty==.
-> data = drf_load_data(project_dir, "cached_dta/167_cache.dta")
-> data$stata2r_original_order_idx = seq_len(nrow(data))
-> assign("has_original_order_idx", TRUE, envir = stata2r::stata2r_env)
-> 
-> # runid = 168
-> # Stata: xtreg donation small_gift large_gift warm_vcm warm_small warm_large under30 elderly, i(id) mle
-> pid = 168
-> if (!exists("parcels")) parcels = list()
-> parcels = repboxDB::repdb_load_parcels(project_dir, c("reg", "regvar", "regxvar"), parcels = parcels)
-> drf = repboxDRF::drf_load(project_dir, parcels = parcels)
-> reg = parcels$reg[parcels$reg$runid == pid, , drop = FALSE]
-> regvar = parcels$regvar[parcels$regvar$runid == pid, , drop = FALSE]
-> regxvar = if (!is.null(parcels$regxvar)) parcels$regxvar[parcels$regxvar$runid == pid, , drop = FALSE] else tibble::tibble()
-> 
-> # dat is the regression-ready data, including the DRF path, filtering,
-> # generated cterm columns, and regxvar columns
-> dat = metaregBase:::mrb_get_regression_data(runid = pid, drf = drf, reg = reg, regvar = regvar, regxvar = regxvar, parcels = parcels)
-> 
-> # Don't call library(plm), would overload dplyr::lag
-> rcmd = "plm::plm"
-> cc_cols = c("small_gift", "large_gift", "warm_vcm", "warm_small", "warm_large", "under30", "elderly", "donation")
-> dat = stata_drop_missing(dat, cc_cols)
-> dat[['.plm.id']] = dat[['id']]
-> dat = regtranslate::cterm_to_saveterm_cols(dat)
-> formula = `donation` ~ `small_gift` + `large_gift` + `warm_vcm` + `warm_small` + `warm_large` + `under30` + `elderly`
-> reg = plm::plm(formula = formula,data = dat,index = '.plm.id')
-> sum = summary(reg)
-> ct = broom::tidy(sum,conf.int=TRUE)
-Error: No tidy method for objects of class summary.plm
-> # This works
-> ct = broom::tidy(reg,conf.int=TRUE)
-> ct
-# A tibble: 7 × 7
-  term     estimate std.error statistic p.value conf.low
-  <chr>       <dbl>     <dbl>     <dbl>   <dbl>    <dbl>
-1 small_g…   0.0396     0.655    0.0604 0.952     -1.24 
-2 large_g…   2.07       0.678    3.05   0.00236    0.738
-3 warm_vcm   3.07       1.13     2.73   0.00649    0.865
-4 warm_sm…   0.323      0.955    0.338  0.735     -1.55 
-5 warm_la…   0.886      1.00     0.883  0.377     -1.08 
-6 under30   -1.50       0.693   -2.16   0.0309    -2.86 
-7 elderly   -0.977      0.517   -1.89   0.0591    -1.99 
-# ℹ 1 more variable: conf.high <dbl>
-> glance = broom::glance(reg)
-> ct$term = regtranslate::saveterm_to_cterm(ct$term)
-
-
-The automatically generated code is
-
-> ct = broom::tidy(sum,conf.int=TRUE)
-Error: No tidy method for objects of class summary.plm
-
-but here it should be 
-
-> ct = broom::tidy(reg,conf.int=TRUE)
-
-I just don't know why for plm the summary was computed and
-
-> ct = broom::tidy(sum,conf.int=TRUE)
-
-Called, are there possibly instances were we need the summary?
-
-If you don't know the reason or there are such cases, maybe for the plm translation try first to call broom::tidy on reg and only if there is an error try it on the summary. But only for plm translations, not generally...
